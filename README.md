@@ -31,4 +31,4 @@ Found a problem in Lockdown itself? Email hello@westwardconsulting.ai. Please do
 
 ## License
 
-Apache-2.0. Made by Westward.
+MIT. Made by Westward.

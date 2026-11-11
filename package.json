@@ -1,7 +1,7 @@
 {
   "name": "lockdown-app",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "MIT",
   "workspaces": [
     "engine",
     "app"
