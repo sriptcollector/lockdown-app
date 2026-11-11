@@ -222,9 +222,12 @@ export function judgeWindows(f: WinFacts, now = new Date()): Omit<Finding, "id">
   if (f.lsaPpl == null || Number(f.lsaPpl) === 0) {
     add({ check: "win.lsa", severity: "low", title: "Saved sign-ins aren't shielded from other programs", why: "LSA protection stops tools like Mimikatz from dumping your Windows credentials from memory.", fix: { fixer: "win.reg", action: "Turn on LSA protection", admin: true, params: { restart: true, risk: "lsa", ops: [{ path: "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa", name: "RunAsPPL", type: "DWord", value: 2 }] } } });
   }
+  // Our own powershell runs with -ExecutionPolicy Bypass (process scope), so PowerShell reports a CurrentUser change as
+  // "overridden by a more specific scope" even though it applied. Only fail if the setting really didn't change.
+  const setUserEp = (v: string) => `try { Set-ExecutionPolicy -Scope CurrentUser ${v} -Force } catch { if ("$(Get-ExecutionPolicy -Scope CurrentUser)" -ne '${v}') { throw } }`;
   const ep = [f.execPolicy?.user, f.execPolicy?.machine].map((x) => String(x));
   if (ep.some((x) => /^(Unrestricted|Bypass)$/i.test(x))) {
-    add({ check: "win.execpolicy", severity: "medium", title: "PowerShell runs any downloaded script", why: "A script from an email or website can run with no warning.", evidence: `policy: ${ep.join(" / ")}`, fix: { fixer: "win.ps", action: "Only run downloaded scripts that are signed", params: { script: "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force", undo: `Set-ExecutionPolicy -Scope CurrentUser ${f.execPolicy?.user || "Undefined"} -Force`, risk: "scripts" } } });
+    add({ check: "win.execpolicy", severity: "medium", title: "PowerShell runs any downloaded script", why: "A script from an email or website can run with no warning.", evidence: `policy: ${ep.join(" / ")}`, fix: { fixer: "win.ps", action: "Only run downloaded scripts that are signed", params: { script: setUserEp("RemoteSigned"), undo: setUserEp(f.execPolicy?.user || "Undefined"), risk: "scripts" } } });
   }
   if (f.autorun == null || Number(f.autorun) < 255) {
     add({ check: "win.autorun", severity: "low", title: "USB drives can start programs on their own", why: "AutoRun is how USB-stick malware spreads.", fix: { fixer: "win.reg", action: "Turn off AutoRun for every drive", params: { ops: [{ path: "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", name: "NoDriveTypeAutoRun", type: "DWord", value: 255 }] } } });

