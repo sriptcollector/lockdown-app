@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { mayRead } from "./permissions";
 import { HOME, IS_MAC, IS_WIN } from "./util";
 
 const SKIP_DIRS = new Set([
@@ -16,7 +17,7 @@ export function codeRoots(prefRoots: string[]): string[] {
   const roots = c.map((d) => join(HOME, d));
   for (const cloud of cloudFolders()) roots.push(join(cloud, "Desktop"), join(cloud, "Documents"), join(cloud, "code"));
   roots.push(HOME); // shallow pass over home itself
-  return [...new Set(roots)].filter((p) => existsSync(p));
+  return [...new Set(roots)].filter((p) => existsSync(p) && mayRead(p));
 }
 
 /** Folders that sync to someone else's cloud. */
@@ -57,6 +58,8 @@ export function walk(root: string, opts: WalkOpts): string[] {
     const key = dir.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
+    // Never look inside a folder macOS guards unless the person allowed it (no surprise popups).
+    if (!mayRead(dir)) return;
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });

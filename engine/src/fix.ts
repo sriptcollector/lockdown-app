@@ -60,7 +60,9 @@ export function listRuns(): string[] {
 export type FixEvent =
   | { type: "fix-start"; findingId: string; action: string }
   | { type: "fix-done"; change: Change }
-  | { type: "fix-held"; findingId: string; reason: string; risks: BreakRisk[] };
+  | { type: "fix-held"; findingId: string; reason: string; risks: BreakRisk[] }
+  /** The system is about to ask for an admin password or a Yes; the app shows what to press. */
+  | { type: "admin-prompt"; count: number };
 
 /** Apply every "apply" item. Admin steps are gathered and run behind one prompt. */
 export async function applyPlan(plan: PlanItem[], prefs: Preferences, emit: (e: FixEvent) => void = () => {}): Promise<{ runId: string; changes: Change[] }> {
@@ -88,6 +90,7 @@ export async function applyPlan(plan: PlanItem[], prefs: Preferences, emit: (e: 
   }
   // One admin prompt for everything that needs it.
   const queued = ctx.admin.steps.map((s) => s.id);
+  if (queued.length) emit({ type: "admin-prompt", count: queued.length });
   await ctx.admin.flush();
   for (const id of queued) {
     const ch = changes.find((c) => c.findingId === id)!;

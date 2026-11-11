@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { type Bridge, connect } from "./bridge";
 import { SecurityMap } from "./Map";
 import { Panel, type Question } from "./Panel";
+import { Folders } from "./Permissions";
 import { Unlock } from "./Unlock";
 import { initialState, type Layer, openFindings, type Preferences, reduce, scoreOf } from "./state";
 
@@ -12,7 +13,16 @@ export function App() {
   const [layer, setLayer] = useState<Layer | null>(null);
   const [canFix, setCanFix] = useState(true);
   const [unlock, setUnlock] = useState<null | { approve?: string[]; only?: string[]; keep?: string[] }>(null);
+  const [askFolders, setAskFolders] = useState(false);
   const started = useRef(false);
+
+  // Before a check, macOS folder popups get their own guided step so none appear by surprise mid-scan.
+  const startScan = async () => {
+    if (!bridge) return;
+    const p = await bridge.permissions().catch(() => null);
+    if (p && p.folders.length && !p.answered) setAskFolders(true);
+    else bridge.scan();
+  };
 
   useEffect(() => {
     if (started.current) return;
@@ -67,13 +77,22 @@ export function App() {
         <div className="side">
           {prefs === undefined ? (
             <div className="panel skeleton" aria-busy="true" />
+          ) : askFolders && bridge ? (
+            <Folders
+              bridge={bridge}
+              onBack={() => setAskFolders(false)}
+              onDone={() => {
+                setAskFolders(false);
+                bridge.scan();
+              }}
+            />
           ) : (
             <Panel
               s={s}
               layer={layer}
               setLayer={setLayer}
               demo={!!bridge?.demo}
-              onScan={() => bridge?.scan()}
+              onScan={startScan}
               onFix={(approve, only, keep) => (canFix ? bridge?.fix(approve, only, keep) : setUnlock({ approve, only, keep }))}
               onUndo={(t) => bridge?.undo(t)}
               onOpen={(t) => bridge?.openTarget(t)}

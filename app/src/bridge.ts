@@ -15,6 +15,17 @@ export interface Bridge {
   savePrefs(p: unknown): Promise<void>;
   account(body: { action: string; email?: string; code?: string; plan?: string }): Promise<any>;
   open(url: string): Promise<void>;
+  /** macOS folder popups, asked up front (empty list on Windows). */
+  permissions(): Promise<{ platform: string; folders: Folder[]; answered: boolean }>;
+  requestFolder(id: string): Promise<{ id: string; state: Folder["state"] }>;
+  recheckFolders(): Promise<{ folders: Folder[] }>;
+}
+
+export interface Folder {
+  id: string;
+  label: string;
+  path: string;
+  state: "allowed" | "denied" | "unasked";
 }
 
 async function openUrl(url: string) {
@@ -65,14 +76,38 @@ export async function connect(): Promise<Bridge> {
     savePrefs: (p) => call("/prefs", p),
     account: (b) => (b.action === "refresh" ? call("/account") : call("/account", b)),
     open: openUrl,
+    permissions: () => call("/permissions"),
+    requestFolder: (id) => call("/permissions/request", { id }),
+    recheckFolders: () => call("/permissions/recheck", {}),
   };
 }
 
 function demoBridge(subs: Set<(e: Ev) => void>, emit: (e: Ev) => void): Bridge {
   let prefs: any = JSON.parse(localStorage.getItem("lockdown-demo-prefs") ?? "null");
   let lastFindings: any[] = [];
+  // ?demo&mac plays the macOS folder step: Documents gets "Don't Allow", then gets turned on in Settings.
+  const mac = new URLSearchParams(location.search).has("mac");
+  const folders: Folder[] = mac
+    ? [
+        { id: "desktop", label: "Desktop", path: "~/Desktop", state: "unasked" },
+        { id: "documents", label: "Documents", path: "~/Documents", state: "unasked" },
+        { id: "downloads", label: "Downloads", path: "~/Downloads", state: "unasked" },
+      ]
+    : [];
+  let rechecks = 0;
   return {
     demo: true,
+    permissions: async () => ({ platform: mac ? "darwin" : "demo", folders: folders.map((f) => ({ ...f })), answered: folders.every((f) => f.state !== "unasked") }),
+    requestFolder: async (id) => {
+      await new Promise((r) => setTimeout(r, 1400));
+      const f = folders.find((x) => x.id === id)!;
+      f.state = id === "documents" ? "denied" : "allowed";
+      return { id, state: f.state };
+    },
+    recheckFolders: async () => {
+      if (++rechecks > 2) for (const f of folders) if (f.state === "denied") f.state = "allowed";
+      return { folders: folders.map((f) => ({ ...f })) };
+    },
     onEvent: (fn) => (subs.add(fn), () => subs.delete(fn)),
     state: async () => ({ prefs, latest: null, runs: [], busy: null, canFix: true }),
     account: async () => ({ canFix: true, plan: "pro", checkoutOpen: false }),
@@ -86,7 +121,7 @@ function demoBridge(subs: Set<(e: Ev) => void>, emit: (e: Ev) => void): Bridge {
         emit(e);
       }, speed);
     },
-    fix: async (approve, _only, keep) => demoFix(lastFindings, approve ?? [], { ...(prefs ?? {}), keep: keep ?? [] }, emit),
+    fix: async (approve, only, keep) => demoFix(lastFindings, approve ?? [], { ...(prefs ?? {}), keep: keep ?? [] }, emit, only),
     questions: async () => demoQuestions(lastFindings),
     openTarget: async () => {},
     undo: async (target) => {

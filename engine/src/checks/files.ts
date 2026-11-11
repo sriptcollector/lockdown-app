@@ -5,6 +5,7 @@ import type { ScanCtx } from "../context";
 import type { Finding, Severity } from "../types";
 import { findSecrets } from "../secrets";
 import { HOME, IS_WIN, redact, run, shortPath } from "../util";
+import { mayRead, skippedFolders } from "../permissions";
 import { cloudFolders, codeRoots, fileSize, inCloudFolder, walk } from "../walk";
 
 type F = Omit<Finding, "id" | "layer">;
@@ -136,8 +137,19 @@ export async function scanFiles(ctx: ScanCtx) {
   await ctx.step("files", "files.exports", "Downloaded password exports and key files", async () => {
     const dirs = ["Downloads", "Desktop", "Documents"].map((d) => join(HOME, d));
     for (const c of cloudFolders()) dirs.push(join(c, "Desktop"), join(c, "Documents"));
+    const skipped = skippedFolders();
+    if (skipped.length) {
+      const names = skipped.map((f) => f.label).join(", ");
+      report({
+        check: "files.not-checked",
+        severity: "info",
+        title: `Lockdown didn't look in ${names}`,
+        why: "Your Mac keeps apps out of these folders until you say yes, so passwords or keys left there weren't checked.",
+        fix: { fixer: "mac.open", action: "Let Lockdown check these folders", params: { url: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_FilesAndFolders" }, manual: `In System Settings > Privacy & Security > Files & Folders, turn on ${names} under Lockdown.` },
+      });
+    }
     for (const d of [...new Set(dirs)]) {
-      if (!existsSync(d)) continue;
+      if (!existsSync(d) || !mayRead(d)) continue;
       const found = walk(d, { maxDepth: 3, match: (n, _f, isDir) => !isDir && (PASSWORD_EXPORT.test(n) || KEY_FILE.test(n) || /\.json$/i.test(n)), limit: 4000 });
       for (const p of found) {
         const n = basename(p);

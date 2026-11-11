@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { applyPlan, latestScan, listRuns, loadJournal, makePlan, questionsFor, undo } from "./fix";
 import { IS_MAC, IS_WIN, run } from "./util";
 import { account, canFix } from "./license";
+import { foldersAnswered, protectedFolders, recheckDenied, requestFolder } from "./permissions";
 import { loadPrefs, savePrefs } from "./prefs";
 import { runScan } from "./scan";
 import { credits } from "./scanners/tools";
@@ -57,6 +58,13 @@ export function serve(port = 0, token = process.env.LOCKDOWN_TOKEN || randomByte
       }
       if (url.pathname === "/state") return json({ busy, canFix: canFix(), prefs: loadPrefs(), latest: latestScan(), runs: listRuns().slice(-20).map((r) => ({ runId: r, changes: loadJournal(r) })), credits: credits() });
       if (url.pathname === "/prefs" && req.method === "POST") return json(savePrefs(await req.json()));
+      // macOS folder popups, asked up front one at a time (see permissions.ts).
+      if (url.pathname === "/permissions") return json({ platform: process.platform, folders: protectedFolders(), answered: foldersAnswered() });
+      if (url.pathname === "/permissions/request" && req.method === "POST") {
+        const { id } = (await req.json()) as { id: string };
+        return json({ id, state: await requestFolder(String(id)) });
+      }
+      if (url.pathname === "/permissions/recheck" && req.method === "POST") return json({ folders: await recheckDenied() });
       if (url.pathname === "/scan" && req.method === "POST") {
         if (busy) return json({ error: `already running a ${busy}` }, 409);
         const body = (await req.json().catch(() => ({}))) as { layers?: Layer[] };

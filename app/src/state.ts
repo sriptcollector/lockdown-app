@@ -39,6 +39,8 @@ export interface State {
   plan: Record<string, PlanRow>;
   fixes: Record<string, { state: FixState; note?: string; changeId?: string }>;
   fixRunId?: string;
+  /** The system's admin prompt is on screen right now. */
+  adminAsking?: boolean;
   error?: string;
 }
 
@@ -89,15 +91,17 @@ export function reduce(s: State, e: Ev): State {
     case "done":
       return { ...s, phase: "results", summary: e.summary, activeChecks: [], layerStatus: Object.fromEntries(LAYERS.map((l) => [l.id, "done"])) as State["layerStatus"] };
     case "fix-plan":
-      return { ...s, phase: "fixing", scoreBefore: s.summary?.score, plan: Object.fromEntries(e.items.map((p: PlanRow) => [p.id, p])), fixes: Object.fromEntries(e.items.filter((p: PlanRow) => p.decision === "hold").map((p: PlanRow) => [p.id, { state: "held" as FixState, note: p.reason }])) };
+      return { ...s, phase: "fixing", scoreBefore: s.summary?.score, plan: Object.fromEntries(e.items.map((p: PlanRow) => [p.id, p])), fixes: { ...s.fixes, ...Object.fromEntries(e.items.filter((p: PlanRow) => p.decision === "hold").map((p: PlanRow) => [p.id, { state: "held" as FixState, note: p.reason }])) } };
     case "fix-start":
       return { ...s, fixes: { ...s.fixes, [e.findingId]: { state: "working" } } };
     case "fix-held":
       return { ...s, fixes: { ...s.fixes, [e.findingId]: { state: "held", note: e.reason } } };
     case "fix-done":
       return { ...s, fixes: { ...s.fixes, [e.change.findingId]: { state: e.change.result, note: e.change.note, changeId: e.change.id } } };
+    case "admin-prompt":
+      return { ...s, adminAsking: true };
     case "fix-finished":
-      return { ...s, phase: "fixed", fixRunId: e.runId };
+      return { ...s, phase: "fixed", fixRunId: e.runId, adminAsking: false };
     case "undo-done": {
       const fixes = { ...s.fixes };
       for (const c of e.changes as Change[]) fixes[c.findingId] = { state: "undone", changeId: c.id };

@@ -70,10 +70,12 @@ export function demoScan(emit: (e: Ev) => void, speed = 1) {
   at(24.4, { type: "done", summary: { runId: "demo", platform: "windows", score: 0, counts: {}, byLayer: {}, targets: TARGETS.length, checksRun: 86, checksSkipped: 0, fixable: 17 } });
 }
 
-export function demoFix(findings: Finding[], approve: string[], prefs: any, emit: (e: Ev) => void) {
+let cancelledOnce = false;
+
+export function demoFix(findings: Finding[], approve: string[], prefs: any, emit: (e: Ev) => void, only?: string[]) {
   const mode = prefs?.mode ?? "safe-auto";
   const keep: string[] = prefs?.keep ?? [];
-  const items = findings.map((x) => {
+  const items = findings.filter((x) => !only?.length || only.includes(x.id)).map((x) => {
     const risks = x.fix?.risks ?? [];
     const manual = !x.fix || x.fix.fixer === "none" || x.fix.fixer === "win.open-settings";
     const kept = risks.find((r) => keep.includes(r.reliance));
@@ -82,11 +84,22 @@ export function demoFix(findings: Finding[], approve: string[], prefs: any, emit
   });
   emit({ type: "fix-plan", items });
   let t = 400;
-  for (const it of items.filter((i) => i.decision === "apply")) {
-    const x = findings.find((y) => y.id === it.id)!;
+  const apply = items.filter((i) => i.decision === "apply").map((i) => findings.find((y) => y.id === i.id)!);
+  // Like the engine: everyday fixes first, then one admin prompt for the rest.
+  // ?demo&cancel plays someone pressing No on that prompt the first time.
+  const admin = apply.filter((x) => x.fix?.admin);
+  const cancel = new URLSearchParams(location.search).has("cancel") && !cancelledOnce;
+  for (const x of apply.filter((y) => !y.fix?.admin)) {
     setTimeout(() => emit({ type: "fix-start", findingId: x.id, action: x.fix!.action }), t);
     t += 550;
     setTimeout(() => emit({ type: "fix-done", change: { id: `demo:${x.id}`, findingId: x.id, result: x.fix!.pr ? "pr-opened" : "applied", note: x.fix!.pr ? "opened a pull request" : undefined } }), t);
+  }
+  if (admin.length) {
+    for (const x of admin) setTimeout(() => emit({ type: "fix-start", findingId: x.id, action: x.fix!.action }), t);
+    setTimeout(() => emit({ type: "admin-prompt", count: admin.length }), t + 100);
+    t += 2800;
+    if (cancel) cancelledOnce = true;
+    for (const x of admin) setTimeout(() => emit({ type: "fix-done", change: { id: `demo:${x.id}`, findingId: x.id, result: cancel ? "failed" : "applied", note: cancel ? "admin prompt was cancelled" : undefined } }), t);
   }
   setTimeout(() => emit({ type: "fix-finished", runId: "demo-fix" }), t + 300);
 }

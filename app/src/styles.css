@@ -288,3 +288,39 @@ p { margin: 0; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   .map .sweep { display: none; }
 }
+
+/* ---- guided system popups (Permissions.tsx) ---- */
+.ask { gap: 14px; }
+.ask .back { align-self: flex-start; }
+.folder-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-width: 420px; }
+.folder-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--line-2); border-radius: 12px; font-size: 15px; }
+.folder-state { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-3); }
+.folder-state.allowed { color: var(--fixed); font-weight: 500; }
+.folder-state.denied { color: var(--high); font-weight: 500; }
+.ask-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.ask-card { display: grid; gap: 10px; max-width: 440px; padding: 16px 18px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--sunken); }
+.ask-card strong { font-size: 16px; font-weight: 550; }
+.ask-card p { margin: 0; color: var(--ink-2); font-size: 15px; max-width: 46ch; }
+
+/* A small drawing of the system's own popup, with the button to press marked. */
+.sysdlg { position: relative; margin: 2px 0 0; width: min(100%, 320px); padding: 16px 16px 14px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); box-shadow: 0 1px 2px oklch(0 0 0 / 0.06), 0 8px 24px oklch(0 0 0 / 0.06); font-size: 13px; }
+.sysdlg.mac { text-align: center; }
+.sysdlg.win { border-radius: 4px; }
+.sysdlg-icon { width: 34px; height: 34px; margin: 0 auto 8px; border-radius: 8px; background: var(--ink); }
+.sysdlg-head { margin: -16px -16px 10px; padding: 6px 12px; font-size: 12px; background: var(--sunken); border-bottom: 1px solid var(--line); border-radius: 4px 4px 0 0; }
+.sysdlg-title { margin: 0 0 4px; font-weight: 600; line-height: 1.35; }
+.sysdlg-sub { margin: 0 0 8px; color: var(--ink-3); }
+.sysfield { display: block; margin: 6px 0 10px; padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink-3); text-align: left; }
+.sysdlg-buttons { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+.sysdlg.win .sysdlg-buttons { justify-content: flex-end; }
+.sysbtn { flex: 1; padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--sunken); }
+.sysdlg.win .sysbtn { flex: 0 0 76px; border-radius: 3px; }
+.sysbtn.press { background: var(--ink); color: var(--on-ink); border-color: var(--ink); box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px var(--fixed); animation: press-pulse 1.8s var(--ease) infinite; }
+.press-tag { margin-top: 10px; font-size: 13px; font-weight: 500; color: var(--fixed); }
+.sysdlg.settings { text-align: left; }
+.sysrow { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); }
+.sysswitch { width: 30px; height: 18px; border-radius: 999px; background: var(--line-2); position: relative; }
+.sysswitch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--panel); }
+.sysswitch.press { box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px var(--fixed); animation: press-pulse 1.8s var(--ease) infinite; }
+@keyframes press-pulse { 50% { box-shadow: 0 0 0 3px var(--panel), 0 0 0 7px color-mix(in oklch, var(--fixed) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .sysbtn.press, .sysswitch.press { animation: none; } }

@@ -2,6 +2,7 @@
 // one button to fix, a plain "You're safe". Everything technical lives behind "See what changed".
 import { useEffect, useMemo, useState } from "react";
 import { Check } from "./Onboarding";
+import { AdminAsk, AdminRetry } from "./Permissions";
 import { type Finding, isManual, type Layer, LAYERS, openFindings, SEV_ORDER, SEV_WORD, type Severity, type State } from "./state";
 
 const fixedStates = new Set(["applied", "pr-opened"]);
@@ -57,7 +58,7 @@ export function Panel(props: {
     );
   }
   if (s.phase === "fixing") return <Fixing s={s} />;
-  if (s.phase === "fixed") return <Done s={s} onOpen={props.onOpen} onScan={props.onScan} seeDetails={() => setDetails(true)} />;
+  if (s.phase === "fixed") return <Done s={s} onOpen={props.onOpen} onScan={props.onScan} onFix={props.onFix} seeDetails={() => setDetails(true)} />;
   return (
     <Found
       s={s}
@@ -191,15 +192,17 @@ function Fixing({ s }: { s: State }) {
       <div className="bar big" aria-hidden>
         <span style={{ transform: `scaleX(${Math.max(0.05, Math.min(1, done / total))})` }} />
       </div>
-      <p className="lede">
-        {Math.min(done, total)} of {total} done
-      </p>
-      <p className="fine">{PERMISSION}</p>
+      <p className="lede">{s.adminAsking ? "Almost done. The last step needs your OK." : `${Math.min(done, total)} of ${total} done`}</p>
+      {s.adminAsking ? <AdminAsk /> : <p className="fine">{PERMISSION}</p>}
     </section>
   );
 }
 
-function Done({ s, onOpen, onScan, seeDetails }: { s: State; onOpen: (t: string) => void; onScan: () => void; seeDetails: () => void }) {
+function Done({ s, onOpen, onScan, onFix, seeDetails }: { s: State; onOpen: (t: string) => void; onScan: () => void; onFix: (approve?: string[], only?: string[]) => void; seeDetails: () => void }) {
+  // Fixes that didn't run because the admin prompt got No / Cancel.
+  const refused = Object.entries(s.fixes)
+    .filter(([, f]) => f.state === "failed" && /prompt was cancel/i.test(f.note ?? ""))
+    .map(([id]) => id);
   const fixed = s.findings.filter((f) => fixedStates.has(s.fixes[f.id]?.state ?? "")).length;
   const left = openFindings(s).filter((f) => f.severity !== "info");
   const yours = left.filter((f) => actionOf(f));
@@ -213,6 +216,7 @@ function Done({ s, onOpen, onScan, seeDetails }: { s: State; onOpen: (t: string)
         Lockdown fixed {fixed} thing{fixed === 1 ? "" : "s"}.{" "}
         {yours.length ? `${yours.length === 1 ? "One thing needs" : `${yours.length} things need`} a click from you${other ? ` (and ${other} smaller one${other === 1 ? " is" : "s are"} in the list)` : ""}:` : other ? `${other === 1 ? "One smaller thing is" : `${other} smaller things are`} in the list if you want to look.` : "We'll check again every week."}
       </p>
+      {refused.length > 0 && <AdminRetry count={refused.length} onRetry={() => onFix(refused, refused)} />}
       {yours.length > 0 && (
         <ul className="todo">
           {yours.map((f) => (
