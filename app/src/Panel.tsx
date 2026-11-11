@@ -30,6 +30,8 @@ export function Panel(props: {
   onOpen: (target: string) => void;
   getQuestions: () => Promise<Question[]>;
   onStop: () => void;
+  accounts: boolean;
+  setAccounts: (on: boolean) => void;
   /** Fixing is unlocked (Pro, or the trial). Before that, the price shows under the Fix button. */
   paid: boolean;
   demo: boolean;
@@ -44,7 +46,7 @@ export function Panel(props: {
   }, [s.phase]);
 
   if (details) return <Details {...props} back={() => setDetails(false)} />;
-  if (s.phase === "idle") return <Idle onScan={props.onScan} demo={props.demo} />;
+  if (s.phase === "idle") return <Idle onScan={props.onScan} demo={props.demo} accounts={props.accounts} setAccounts={props.setAccounts} />;
   if (s.phase === "scanning") return <Scanning s={s} onStop={props.onStop} demo={props.demo} />;
   if (questions) {
     return (
@@ -77,7 +79,7 @@ export function Panel(props: {
   );
 }
 
-function Idle({ onScan, demo }: { onScan: () => void; demo: boolean }) {
+function Idle({ onScan, demo, accounts, setAccounts }: { onScan: () => void; demo: boolean; accounts: boolean; setAccounts: (on: boolean) => void }) {
   if (demo) {
     return (
       <section className="panel hero">
@@ -99,6 +101,10 @@ function Idle({ onScan, demo }: { onScan: () => void; demo: boolean }) {
       <button className="btn primary huge" onClick={onScan} autoFocus>
         <Shield /> Check my computer
       </button>
+      <label className="include">
+        <input type="checkbox" checked={accounts} onChange={(e) => setAccounts(e.target.checked)} />
+        <span>Also check the GitHub and cloud accounts you're signed in to here, and your code folders</span>
+      </label>
       <p className="fine">Free · usually a few minutes · your files and code never leave your computer</p>
     </section>
   );
@@ -320,7 +326,8 @@ function Done({ s, onOpen, onScan, onFix, seeDetails, demo }: { s: State; onOpen
 
 /** Says what the button does: "Update now", not "Do it". */
 function buttonFor(target: string): string {
-  if (/windowsupdate|Software-Update/i.test(target)) return "Update now";
+  if (/windowsupdate/i.test(target)) return "Open Windows Update";
+  if (/Software-Update/i.test(target)) return "Open Software Update";
   if (/deviceencryption|FileVault/i.test(target)) return "Turn it on";
   if (/appsfeatures/i.test(target)) return "Open apps";
   if (/threatsettings/i.test(target)) return "Open settings";
@@ -349,8 +356,10 @@ export function actionOf(f: Finding): string | null {
 }
 
 // ---------- details: the full list, undo, and the technical words ----------
-function Details({ s, layer, setLayer, onUndo, back }: Parameters<typeof Panel>[0] & { back: () => void }) {
+function Details({ s, layer, setLayer, onUndo, onOpen, back }: Parameters<typeof Panel>[0] & { back: () => void }) {
   const [open, setOpen] = useState<string | null>(null);
+  // Same count as the headline and the map: things still to fix, not notes or what's already fixed.
+  const toFix = (l?: Layer) => s.findings.filter((f) => (!l || f.layer === l) && f.severity !== "info" && !fixedStates.has(s.fixes[f.id]?.state ?? "")).length;
   const visible = useMemo(() => s.findings.filter((f) => !layer || f.layer === layer).sort((a, b) => SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(b.severity)), [s.findings, layer]);
   const anyFixed = s.findings.some((f) => fixedStates.has(s.fixes[f.id]?.state ?? ""));
   return (
@@ -367,20 +376,21 @@ function Details({ s, layer, setLayer, onUndo, back }: Parameters<typeof Panel>[
       </header>
       <nav className="filters" aria-label="Filter by area">
         <button className={`chip ${!layer ? "on" : ""}`} onClick={() => setLayer(null)}>
-          All <span className="mono">{s.findings.length}</span>
+          All <span className="mono">{toFix()} to fix</span>
         </button>
         {LAYERS.map((l) => {
-          const n = s.findings.filter((f) => f.layer === l.id).length;
-          return n ? (
+          const n = toFix(l.id);
+          const any = s.findings.some((f) => f.layer === l.id);
+          return any ? (
             <button key={l.id} className={`chip ${layer === l.id ? "on" : ""}`} onClick={() => setLayer(layer === l.id ? null : l.id)}>
-              {l.name} <span className="mono">{n}</span>
+              {l.name} <span className="mono">{n || "done"}</span>
             </button>
           ) : null;
         })}
       </nav>
       <ul className="findings">
         {visible.map((f) => (
-          <Row key={f.id} f={f} s={s} open={open === f.id} toggle={() => setOpen(open === f.id ? null : f.id)} onUndo={onUndo} />
+          <Row key={f.id} f={f} s={s} open={open === f.id} toggle={() => setOpen(open === f.id ? null : f.id)} onUndo={onUndo} onOpen={onOpen} />
         ))}
         {!visible.length && <li className="empty">Nothing found here.</li>}
       </ul>
@@ -388,7 +398,7 @@ function Details({ s, layer, setLayer, onUndo, back }: Parameters<typeof Panel>[
   );
 }
 
-function Row({ f, s, open, toggle, onUndo }: { f: Finding; s: State; open: boolean; toggle: () => void; onUndo: (id: string) => void }) {
+function Row({ f, s, open, toggle, onUndo, onOpen }: { f: Finding; s: State; open: boolean; toggle: () => void; onUndo: (id: string) => void; onOpen: (t: string) => void }) {
   const fx = s.fixes[f.id];
   const fixed = fixedStates.has(fx?.state ?? "");
   const risks = s.plan[f.id]?.risks?.length ? s.plan[f.id].risks : (f.fix?.risks ?? []);
@@ -427,6 +437,11 @@ function Row({ f, s, open, toggle, onUndo }: { f: Finding; s: State; open: boole
           ))}
           {fx?.note && <p className="muted small mono">{fx.note}</p>}
           <div className="row-actions">
+            {!fixed && actionOf(f) && (
+              <button className="btn primary small" onClick={() => onOpen(actionOf(f)!)}>
+                {buttonFor(actionOf(f)!)}
+              </button>
+            )}
             {fixed && fx?.changeId && (
               <button className="btn ghost small" onClick={() => onUndo(fx.changeId!)}>
                 Undo

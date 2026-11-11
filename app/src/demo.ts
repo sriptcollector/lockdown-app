@@ -107,8 +107,8 @@ export function demoFix(findings: Finding[], approve: string[], prefs: any, emit
 // Same plain questions the engine asks, for the sample data.
 export function demoQuestions(findings: Finding[]) {
   const ask: Record<string, [string, string, string, string]> = {
-    "remote-access": ["Do you ever get into this computer from another device?", "Like controlling it from your phone or from another computer. Most people don't.", "Yes, keep that working", "No, lock it"],
-    build: ["Lock down the steps that publish your code?", "Only matters if someone publishes a website or app from your GitHub. It might need a small change after.", "Not now", "Yes, fix them"],
+    "remote-access": ["Do you ever get into this computer from another device?", "Like controlling it from your phone or from another computer.", "Yes, keep that working", "No, lock it"],
+    build: ["Tighten how your code gets published?", "Only matters if your website or app is published from GitHub. It might need a small change after.", "Not now", "Yes, tighten it"],
     "running-app": ["Turn off old keys that could let someone in?", "A website or app that still uses one would stop until it gets a new one.", "Not now", "Yes, fix them"],
   };
   const by = new Map<string, Finding[]>();

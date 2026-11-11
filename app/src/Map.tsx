@@ -102,7 +102,7 @@ export function SecurityMap({ s, score, selected, onSelect }: { s: State; score:
               {n.name}
             </text>
             <text x={lx} y={ly + 17} textAnchor={anchor} className="node-meta">
-              {st === "checking" ? "checking…" : st === "waiting" && s.phase !== "idle" ? "" : s.phase === "idle" ? "" : allFixed ? "fixed" : count ? `${count} to fix` : "safe"}
+              {st === "checking" ? "checking…" : st === "waiting" && s.phase !== "idle" ? "" : s.phase === "idle" ? "" : s.skipped?.includes(n.id) ? "not checked" : allFixed ? "fixed" : count ? `${count} to fix` : "safe"}
             </text>
           </g>
         );

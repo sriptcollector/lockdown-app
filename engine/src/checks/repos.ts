@@ -110,6 +110,16 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
   }
 }
 
+/** Days since anyone worked in this project (git updates its index on every checkout, add and commit). */
+function idleDays(r: RepoMeta): number {
+  for (const f of ["index", "HEAD"]) {
+    try {
+      return (Date.now() - statSync(join(r.path, ".git", f)).mtimeMs) / 864e5;
+    } catch {}
+  }
+  return 0;
+}
+
 /** Deep code checks (leaked keys, unsafe code) get this long in one scan. */
 const CODE_BUDGET_MS = Number(process.env.LOCKDOWN_CODE_BUDGET_MS) || 3 * 60_000;
 const LOCKFILES = new Set(["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "requirements.txt", "poetry.lock", "Pipfile.lock", "uv.lock", "Cargo.lock", "go.sum", "Gemfile.lock", "composer.lock", "pubspec.lock", "mix.lock"]);
@@ -237,6 +247,23 @@ async function osvAll(ctx: ScanCtx, repos: RepoMeta[]): Promise<void | string> {
       const key = `${p.package?.name}@${p.package?.version}`;
       if (!g.pkgs.has(key)) g.pkgs.set(key, { name: p.package?.name, version: p.package?.version, ids: (p.groups ?? []).map((x: any) => x.aliases?.find((a: string) => a.startsWith("CVE")) ?? x.ids?.[0]).filter(Boolean), sev: maxSev, fixed });
     }
+  }
+  // Projects nobody has touched in six months are usually old experiments: one calm note for all of them,
+  // instead of dozens of alarms that drown out what matters.
+  const old = [...byRepo.keys()].filter((r) => idleDays(r) > 180);
+  if (old.length > 1) {
+    const holes = old.reduce((n, r) => n + byRepo.get(r)!.pkgs.size, 0);
+    ctx.report({
+      layer: "code",
+      check: "code.deps-old",
+      severity: "low",
+      title: `${old.length} old projects use packages with known holes`,
+      why: "You haven't worked on these in over six months. If none of them run anywhere, they can't be attacked. If one is still online, update it or take it down.",
+      evidence: `${holes} packages across ${old.slice(0, 6).map((r) => r.name).join(", ")}${old.length > 6 ? ` and ${old.length - 6} more` : ""}`,
+      source: "OSV-Scanner",
+      fix: { fixer: "none", action: "Update or take down any that are still online", params: {}, manual: "Open each project that still runs somewhere and update its packages, or delete projects you no longer use." },
+    });
+    for (const r of old) byRepo.delete(r);
   }
   for (const [repo, g] of byRepo) {
     const pkgs = [...g.pkgs.values()].sort((a, b) => b.sev - a.sev);

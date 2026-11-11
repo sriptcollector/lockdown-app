@@ -164,11 +164,11 @@ export async function cliFix(cmd: string, args: string[]) {
 
 // ---------- plain questions for the few fixes that will likely break something ----------
 const ASK: Record<string, { q: string; help: string; keep: string; fix: string }> = {
-  "remote-access": { q: "Do you ever get into this computer from another device?", help: "Like controlling it from your phone or from another computer. Most people don't.", keep: "Yes, keep that working", fix: "No, lock it" },
+  "remote-access": { q: "Do you ever get into this computer from another device?", help: "Like controlling it from your phone or from another computer.", keep: "Yes, keep that working", fix: "No, lock it" },
   "lan-dev-servers": { q: "Do you open things running on this computer from your phone?", help: "Like a website you're building, or a game server for friends.", keep: "Yes, keep that working", fix: "No, lock it" },
   "file-sharing": { q: "Do other computers open folders on this one?", help: "Like a shared folder at home or work.", keep: "Yes, keep sharing", fix: "No, turn it off" },
-  "public-repos": { q: "Is some of your code meant to be public?", help: "Like an open-source project people download.", keep: "Yes, keep it public", fix: "No, make it private" },
-  "build": { q: "Lock down the steps that publish your code?", help: "Only matters if someone publishes a website or app from your GitHub. It might need a small change after.", keep: "Not now", fix: "Yes, fix them" },
+  "public-repos": { q: "Should some of your code stay public?", help: "Like an open-source project other people download.", keep: "Yes, leave it public", fix: "No, make it private" },
+  "build": { q: "Tighten how your code gets published?", help: "Only matters if your website or app is published from GitHub. It might need a small change after.", keep: "Not now", fix: "Yes, tighten it" },
   "running-app": { q: "Turn off old keys that could let someone in?", help: "A website or app that still uses one would stop until it gets a new one.", keep: "Not now", fix: "Yes, fix them" },
   "unsigned-scripts": { q: "Do you run scripts you download from the internet?", help: "Most people don't.", keep: "Yes, keep that working", fix: "No, block them" },
   "git-history": { q: "Clean leaked keys out of your code history?", help: "Anyone else working on the code will need a fresh copy.", keep: "Not now", fix: "Yes, clean it" },
@@ -197,12 +197,21 @@ export function questionsFor(plan: PlanItem[]): Question[] {
     const a = ASK[reliance] ?? ASK["running-app"];
     // Only say what we noticed when it is plain words about their own setup (like "Tailscale is running").
     const evidence = ["remote-access", "lan-dev-servers", "file-sharing"].includes(reliance) ? items.flatMap((i) => i.risks.map((r) => r.evidence)).find(Boolean) : undefined;
-    // If we saw it being used right now, keeping it is the safe default.
-    const recommended = evidence ? "keep" : "fix";
+    // If we saw it being used right now, keeping it is the safe default. Public code is never hidden by
+    // default either (open source is public on purpose), unless its name says it's private work.
+    const publicNames = reliance === "public-repos" ? items.map((i) => String(i.finding.where ?? "").split("/").pop()).filter(Boolean) : [];
+    const recommended = evidence ? "keep" : reliance === "public-repos" ? (items.every((i) => i.finding.severity === "high") ? "fix" : "keep") : "fix";
     const options: Question["options"] = [{ value: "fix", label: a.fix }, { value: "keep", label: a.keep }];
     if (recommended === "keep") options.reverse();
     options.push({ value: "keep", label: "I'm not sure, leave it as it is", unsure: true });
     const touches = [...new Set(items.map((i) => i.finding.fix?.action ?? i.finding.title))].slice(0, 3);
-    return { reliance, question: a.q, help: evidence ? `${a.help} We noticed: ${evidence}.` : a.help, options, recommended, findingIds: items.map((i) => i.finding.id), why: evidence, touches };
+    const help = evidence
+      ? `${a.help} We noticed: ${evidence}.`
+      : publicNames.length
+        ? `${a.help} Public right now: ${publicNames.slice(0, 4).join(", ")}${publicNames.length > 4 ? ` and ${publicNames.length - 4} more` : ""}.`
+        : reliance === "remote-access"
+          ? `${a.help} Most people don't.`
+          : a.help;
+    return { reliance, question: a.q, help, options, recommended, findingIds: items.map((i) => i.finding.id), why: evidence, touches };
   });
 }

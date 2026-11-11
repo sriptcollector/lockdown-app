@@ -41,6 +41,8 @@ export interface State {
   plan: Record<string, PlanRow>;
   fixes: Record<string, { state: FixState; note?: string; changeId?: string }>;
   fixRunId?: string;
+  /** Areas left out of this check (the person switched them off), shown as "not checked", never "safe". */
+  skipped?: Layer[];
   /** The system's admin prompt is on screen right now. */
   adminAsking?: boolean;
   error?: string;
@@ -65,9 +67,9 @@ export function reduce(s: State, e: Ev): State {
     case "reset":
       return initialState();
     case "load-latest":
-      return { ...initialState(), phase: "results", findings: e.result.findings, targets: e.result.targets, summary: e.result.summary, runId: e.result.summary.runId, layerStatus: Object.fromEntries(LAYERS.map((l) => [l.id, "done"])) as State["layerStatus"] };
+      return { ...initialState(), phase: "results", findings: e.result.findings, targets: e.result.targets, summary: e.result.summary, runId: e.result.summary.runId, skipped: e.result.checks ? LAYERS.map((l) => l.id).filter((id) => !e.result.checks.some((c: { layer: string }) => c.layer === id)) : [], layerStatus: Object.fromEntries(LAYERS.map((l) => [l.id, "done"])) as State["layerStatus"] };
     case "start":
-      return { ...initialState(), phase: "scanning", runId: e.runId, startedAt: Date.now(), layerStatus: Object.fromEntries(LAYERS.map((l) => [l.id, e.layers.includes(l.id) ? "waiting" : "done"])) as State["layerStatus"] };
+      return { ...initialState(), phase: "scanning", runId: e.runId, startedAt: Date.now(), skipped: LAYERS.map((l) => l.id).filter((id) => !e.layers.includes(id)), layerStatus: Object.fromEntries(LAYERS.map((l) => [l.id, e.layers.includes(l.id) ? "waiting" : "done"])) as State["layerStatus"] };
     case "target":
       return { ...s, targets: [...s.targets, e.target] };
     case "plan":

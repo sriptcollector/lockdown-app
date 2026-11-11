@@ -7,7 +7,8 @@ export interface Bridge {
   demo: boolean;
   onEvent(fn: (e: Ev) => void): () => void;
   state(): Promise<any>;
-  scan(): Promise<void>;
+  /** Run a check; leave out layers the person switched off (e.g. accounts and code). */
+  scan(layers?: string[]): Promise<void>;
   /** Stop a running check and show what it found so far. */
   stopScan(): Promise<void>;
   fix(approve?: string[], only?: string[], keep?: string[]): Promise<void>;
@@ -70,7 +71,7 @@ export async function connect(): Promise<Bridge> {
     demo: false,
     onEvent: (fn) => (subs.add(fn), () => subs.delete(fn)),
     state: () => call("/state"),
-    scan: () => call("/scan", {}),
+    scan: (layers) => call("/scan", layers ? { layers } : {}),
     stopScan: () => call("/scan/stop", {}),
     fix: (approve, only, keep) => call("/fix", { approve, only, keep }),
     questions: () => call("/questions"),

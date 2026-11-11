@@ -14,6 +14,9 @@ export function App() {
   const [canFix, setCanFix] = useState(true);
   const [unlock, setUnlock] = useState<null | { approve?: string[]; only?: string[]; keep?: string[] }>(null);
   const [askFolders, setAskFolders] = useState(false);
+  // "Also check my GitHub, cloud accounts and code folders": on by default, remembered on this computer.
+  const [accounts, setAccounts] = useState(() => localStorage.getItem("lockdown-accounts") !== "off");
+  const layersFor = () => (accounts ? undefined : ["system", "network", "files", "apps"]);
   // The website demo can't open settings on the visitor's computer, so its buttons say what the app would do.
   const [demoNote, setDemoNote] = useState<string | null>(null);
   const started = useRef(false);
@@ -23,7 +26,7 @@ export function App() {
     if (!bridge) return;
     const p = await bridge.permissions().catch(() => null);
     if (p && p.folders.length && !p.answered) setAskFolders(true);
-    else bridge.scan();
+    else bridge.scan(layersFor());
   };
 
   useEffect(() => {
@@ -90,7 +93,7 @@ export function App() {
               onBack={() => setAskFolders(false)}
               onDone={() => {
                 setAskFolders(false);
-                bridge.scan();
+                bridge.scan(layersFor());
               }}
             />
           ) : (
@@ -100,6 +103,11 @@ export function App() {
               setLayer={setLayer}
               demo={!!bridge?.demo}
               onScan={startScan}
+              accounts={accounts}
+              setAccounts={(on) => {
+                setAccounts(on);
+                localStorage.setItem("lockdown-accounts", on ? "on" : "off");
+              }}
               onStop={() => bridge?.stopScan()}
               paid={canFix}
               onFix={(approve, only, keep) => (canFix ? bridge?.fix(approve, only, keep) : setUnlock({ approve, only, keep }))}

@@ -329,3 +329,7 @@ p { margin: 0; }
 .demo-banner { margin: 0; padding: 9px 20px; font-size: 14px; text-align: center; background: var(--sunken); border-bottom: 1px solid var(--line); color: var(--ink-2); }
 .demo-banner a { color: var(--ink); font-weight: 550; margin-left: 6px; }
 .demo-note { padding: 0 28px 16px; }
+
+/* "Also check my accounts and code" switch on the first screen. */
+.include { display: flex; gap: 10px; align-items: flex-start; max-width: 40ch; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+.include input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--ink); flex: none; }
