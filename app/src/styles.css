@@ -324,3 +324,8 @@ p { margin: 0; }
 .sysswitch.press { box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px var(--fixed); animation: press-pulse 1.8s var(--ease) infinite; }
 @keyframes press-pulse { 50% { box-shadow: 0 0 0 3px var(--panel), 0 0 0 7px color-mix(in oklch, var(--fixed) 40%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .sysbtn.press, .sysswitch.press { animation: none; } }
+
+/* Website demo: always say it's an example, never the visitor's own computer. */
+.demo-banner { margin: 0; padding: 9px 20px; font-size: 14px; text-align: center; background: var(--sunken); border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.demo-banner a { color: var(--ink); font-weight: 550; margin-left: 6px; }
+.demo-note { padding: 0 28px 16px; }

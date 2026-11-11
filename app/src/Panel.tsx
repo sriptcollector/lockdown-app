@@ -29,6 +29,9 @@ export function Panel(props: {
   onUndo: (target: string) => void;
   onOpen: (target: string) => void;
   getQuestions: () => Promise<Question[]>;
+  onStop: () => void;
+  /** Fixing is unlocked (Pro, or the trial). Before that, the price shows under the Fix button. */
+  paid: boolean;
   demo: boolean;
 }) {
   const { s } = props;
@@ -41,8 +44,8 @@ export function Panel(props: {
   }, [s.phase]);
 
   if (details) return <Details {...props} back={() => setDetails(false)} />;
-  if (s.phase === "idle") return <Idle onScan={props.onScan} />;
-  if (s.phase === "scanning") return <Scanning s={s} />;
+  if (s.phase === "idle") return <Idle onScan={props.onScan} demo={props.demo} />;
+  if (s.phase === "scanning") return <Scanning s={s} onStop={props.onStop} demo={props.demo} />;
   if (questions) {
     return (
       <Questions
@@ -57,11 +60,13 @@ export function Panel(props: {
       />
     );
   }
-  if (s.phase === "fixing") return <Fixing s={s} />;
-  if (s.phase === "fixed") return <Done s={s} onOpen={props.onOpen} onScan={props.onScan} onFix={props.onFix} seeDetails={() => setDetails(true)} />;
+  if (s.phase === "fixing") return <Fixing s={s} demo={props.demo} />;
+  if (s.phase === "fixed") return <Done s={s} onOpen={props.onOpen} onScan={props.onScan} onFix={props.onFix} seeDetails={() => setDetails(true)} demo={props.demo} />;
   return (
     <Found
       s={s}
+      demo={props.demo}
+      paid={props.paid}
       onFix={async () => {
         const q = await props.getQuestions().catch(() => []);
         if (q.length) setQuestions(q);
@@ -72,18 +77,35 @@ export function Panel(props: {
   );
 }
 
-function Idle({ onScan }: { onScan: () => void }) {
+function Idle({ onScan, demo }: { onScan: () => void; demo: boolean }) {
+  if (demo) {
+    return (
+      <section className="panel hero">
+        <h1>See an example check</h1>
+        <p className="lede">This plays Lockdown on a sample computer, so you can see what it does. It doesn't look at your computer. To check your own, download Lockdown. Checking is free.</p>
+        <button className="btn primary huge" onClick={onScan} autoFocus>
+          Play the example
+        </button>
+        <a className="textlink" href={INSTALL} target="_top">
+          Check my own computer instead
+        </a>
+      </section>
+    );
+  }
   return (
     <section className="panel hero">
       <h1>Is your computer safe?</h1>
-      <p className="lede">Press the button. Lockdown checks your computer, your accounts and your code for every way someone could break in, then fixes it.</p>
+      <p className="lede">Hackers look for easy ways in, like skipped updates. Lockdown finds them for free and closes them for you.</p>
       <button className="btn primary huge" onClick={onScan} autoFocus>
         <Shield /> Check my computer
       </button>
-      <p className="fine">Free · about 3 minutes · nothing leaves your computer</p>
+      <p className="fine">Free · usually a few minutes · your files and code never leave your computer</p>
     </section>
   );
 }
+
+const INSTALL = "https://lockdown.westwardconsulting.ai/install";
+const PRICE = "Fixing is Lockdown Pro: 7 days free, then $96 a year or $12 a month. Cancel any time.";
 
 const PLAIN: Record<string, string> = {
   system: "Checking your computer's settings",
@@ -95,22 +117,50 @@ const PLAIN: Record<string, string> = {
   cloud: "Checking your cloud accounts",
 };
 
-function Scanning({ s }: { s: State }) {
-  const done = LAYERS.filter((l) => s.layerStatus[l.id] === "done").length;
+function Scanning({ s, onStop, demo }: { s: State; onStop: () => void; demo: boolean }) {
+  // Re-render every few seconds so the time left stays current.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 3000);
+    return () => clearInterval(t);
+  }, []);
+  const [stopping, setStopping] = useState(false);
+  const layersDone = LAYERS.filter((l) => s.layerStatus[l.id] === "done").length / LAYERS.length;
+  // Progress counts finished checks against the engine's estimate, so the bar keeps moving through big code scans.
+  const total = Math.max(s.checksTotal ?? 0, s.checksDone + s.activeChecks.length + 1);
+  const p = s.checksTotal ? Math.min(0.97, s.checksDone / total) : layersDone;
+  const elapsed = (Date.now() - (s.startedAt ?? Date.now())) / 1000;
+  const left = p > 0.08 && elapsed > 20 ? Math.ceil((elapsed / p - elapsed) / 60) : null;
   const now = s.activeChecks.at(-1);
+  const found = s.findings.length ? `${s.findings.length} thing${s.findings.length === 1 ? "" : "s"} found so far` : "Nothing found yet";
   return (
     <section className="panel hero" aria-live="polite">
-      <h1>Checking your computer…</h1>
+      <h1>{demo ? "Checking the sample computer…" : "Checking your computer…"}</h1>
       <div className="bar big" aria-hidden>
-        <span style={{ transform: `scaleX(${Math.max(0.05, done / LAYERS.length)})` }} />
+        <span style={{ transform: `scaleX(${Math.max(0.05, p)})` }} />
       </div>
       <p className="lede">{now ? PLAIN[now.layer] : "Getting started"}</p>
-      <p className="fine">{s.findings.length ? `${s.findings.length} thing${s.findings.length === 1 ? "" : "s"} found so far` : "Nothing found yet"}</p>
+      {now && /project \d+ of \d+/.test(now.label) && <p className="fine">{now.label}</p>}
+      <p className="fine">
+        {left == null ? "Usually a few minutes" : left <= 1 ? "Less than a minute left" : `About ${left} minutes left`} · {found}
+      </p>
+      {!demo && (
+        <button
+          className="textlink"
+          disabled={stopping}
+          onClick={() => {
+            setStopping(true);
+            onStop();
+          }}
+        >
+          {stopping ? "Stopping…" : "Stop and show what's found so far"}
+        </button>
+      )}
     </section>
   );
 }
 
-function Found({ s, onFix, seeDetails }: { s: State; onFix: () => void; seeDetails: () => void }) {
+function Found({ s, onFix, seeDetails, demo, paid }: { s: State; onFix: () => void; seeDetails: () => void; demo: boolean; paid: boolean }) {
   const open = openFindings(s).filter((f) => f.severity !== "info");
   const autoFix = open.filter((f) => !isManual(f));
   const serious = open.filter((f) => f.severity === "critical" || f.severity === "high").length;
@@ -118,8 +168,8 @@ function Found({ s, onFix, seeDetails }: { s: State; onFix: () => void; seeDetai
     return (
       <section className="panel hero">
         <SafeMark />
-        <h1>You're safe</h1>
-        <p className="lede">We didn't find any way in. Lockdown will check again every week.</p>
+        <h1>{s.summary?.partial ? "Nothing found so far" : "You're safe"}</h1>
+        <p className="lede">{s.summary?.partial ? "You stopped the check early, so some things weren't checked. Press Check again any time." : "We didn't find any way in. Lockdown will check again every week."}</p>
         <button className="textlink" onClick={seeDetails}>
           See what we checked
         </button>
@@ -129,16 +179,17 @@ function Found({ s, onFix, seeDetails }: { s: State; onFix: () => void; seeDetai
   return (
     <section className="panel hero">
       <h1>
-        We found {open.length} way{open.length === 1 ? "" : "s"} someone could get in
+        {demo ? `The sample computer has ${open.length} way${open.length === 1 ? "" : "s"} in` : `We found ${open.length} way${open.length === 1 ? "" : "s"} someone could get in`}
       </h1>
       <p className="lede">
-        Your safety score is {scoreText(s)} out of 100. {serious ? `${serious} of them ${serious === 1 ? "is" : "are"} serious. ` : ""}
+        {demo ? "Its" : "Your"} safety score is {scoreText(s)} out of 100. {serious ? `${serious} of them ${serious === 1 ? "is" : "are"} serious. ` : ""}
         {autoFix.length === open.length ? "Lockdown can fix all of them for you." : autoFix.length ? `Lockdown fixes ${autoFix.length} by itself. The other ${open.length - autoFix.length} take one click from you, and we'll show you how.` : "Each one takes one click from you, and we'll show you how."}
       </p>
       <button className="btn primary huge" onClick={onFix} autoFocus>
         <Shield /> Fix everything
       </button>
-      <p className="fine">Takes about a minute. You can undo anything.</p>
+      <p className="fine">{paid || demo ? "Takes about a minute. You can undo anything." : PRICE}</p>
+      {s.summary?.partial && <p className="fine">You stopped the check early, so some things weren't checked.</p>}
       <button className="textlink" onClick={seeDetails}>
         See the list
       </button>
@@ -183,7 +234,7 @@ function Questions({ questions, picked: saved, setPicked, onBack, onDone }: { qu
   );
 }
 
-function Fixing({ s }: { s: State }) {
+function Fixing({ s, demo }: { s: State; demo: boolean }) {
   const total = Object.values(s.plan).filter((p) => p.decision === "apply").length || 1;
   const done = Object.values(s.fixes).filter((f) => ["applied", "pr-opened", "failed", "skipped"].includes(f.state)).length;
   return (
@@ -193,12 +244,12 @@ function Fixing({ s }: { s: State }) {
         <span style={{ transform: `scaleX(${Math.max(0.05, Math.min(1, done / total))})` }} />
       </div>
       <p className="lede">{s.adminAsking ? "Almost done. The last step needs your OK." : `${Math.min(done, total)} of ${total} done`}</p>
-      {s.adminAsking ? <AdminAsk /> : <p className="fine">{PERMISSION}</p>}
+      {demo ? <p className="fine">On a real computer, Lockdown asks Windows or your Mac for permission once before changing settings.</p> : s.adminAsking ? <AdminAsk /> : <p className="fine">{PERMISSION}</p>}
     </section>
   );
 }
 
-function Done({ s, onOpen, onScan, onFix, seeDetails }: { s: State; onOpen: (t: string) => void; onScan: () => void; onFix: (approve?: string[], only?: string[]) => void; seeDetails: () => void }) {
+function Done({ s, onOpen, onScan, onFix, seeDetails, demo }: { s: State; onOpen: (t: string) => void; onScan: () => void; onFix: (approve?: string[], only?: string[]) => void; seeDetails: () => void; demo: boolean }) {
   // Fixes that didn't run because the admin prompt got No / Cancel.
   const refused = Object.entries(s.fixes)
     .filter(([, f]) => f.state === "failed" && /prompt was cancel/i.test(f.note ?? ""))
@@ -208,6 +259,28 @@ function Done({ s, onOpen, onScan, onFix, seeDetails }: { s: State; onOpen: (t: 
   const yours = left.filter((f) => actionOf(f));
   const other = left.length - yours.length;
   const safe = !left.length;
+  if (demo) {
+    return (
+      <section className="panel hero">
+        <h1>The sample computer is {safe ? "safe" : "much safer"}</h1>
+        <p className="lede">
+          Lockdown fixed {fixed} thing{fixed === 1 ? "" : "s"} on it by itself{yours.length ? `, and showed the owner how to do the last ${yours.length === 1 ? "one" : yours.length}` : ""}. Every change can be undone.
+        </p>
+        <a className="btn primary huge" href={INSTALL} target="_top">
+          Check my own computer, free
+        </a>
+        <p className="fine">{PRICE}</p>
+        <div className="row">
+          <button className="textlink" onClick={seeDetails}>
+            See what changed
+          </button>
+          <button className="textlink" onClick={onScan}>
+            Play it again
+          </button>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="panel hero">
       {safe && <SafeMark />}

@@ -12,7 +12,7 @@ import { scanSites } from "./checks/web";
 import { makeCtx } from "./context";
 import type { Layer, Preferences, ScanEvent, ScanResult, ScanSummary, Severity } from "./types";
 import { LAYERS } from "./types";
-import { dataDir, IS_MAC, IS_WIN } from "./util";
+import { dataDir, IS_MAC, IS_WIN, scanStop } from "./util";
 
 // Points off per severity, growing with the square root of the count so 50 low findings don't
 // outweigh one critical. Score starts at 100, floors at 0.
@@ -42,12 +42,15 @@ export function summarize(runId: string, r: Omit<ScanResult, "summary">): ScanSu
 
 export async function runScan(prefs: Preferences, emit: (e: ScanEvent) => void, only?: Layer[]): Promise<ScanResult> {
   const runId = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  scanStop.reset();
   const ctx = makeCtx(runId, prefs, emit);
   const want = (l: Layer) => !only || only.includes(l);
   emit({ type: "start", runId, at: new Date().toISOString(), platform: IS_WIN ? "windows" : IS_MAC ? "macos" : "linux", layers: (only ?? LAYERS.map((l) => l.id)) as Layer[] });
   ctx.target({ kind: "machine", id: "machine", name: hostname(), layer: "system" });
 
   const repos = want("code") || want("github") ? await discoverRepos(ctx) : [];
+  // Rough size of the job so the progress bar moves evenly: ~30 machine, file and account checks, plus 4 per project.
+  emit({ type: "plan", total: 30 + (want("code") ? repos.length * 4 + 1 : 0) + (want("github") ? 3 : 0) });
 
   // Machine, files, cloud and GitHub run side by side; code scanning is the long pole.
   await Promise.all([
@@ -65,7 +68,8 @@ export async function runScan(prefs: Preferences, emit: (e: ScanEvent) => void, 
     want("code") ? scanRepos(ctx, repos) : null,
   ]);
 
-  const result: ScanResult = { summary: summarize(runId, ctx), findings: ctx.findings, targets: ctx.targets, checks: ctx.checks };
+  const result: ScanResult = { summary: { ...summarize(runId, ctx), partial: scanStop.stopped || undefined }, findings: ctx.findings, targets: ctx.targets, checks: ctx.checks };
+  scanStop.reset();
   const order: Severity[] = ["critical", "high", "medium", "low", "info"];
   result.findings.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
   writeFileSync(join(dataDir("scans"), `${runId}.json`), JSON.stringify(result, null, 1));

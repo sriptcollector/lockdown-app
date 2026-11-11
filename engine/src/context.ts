@@ -1,5 +1,5 @@
 import type { Finding, Layer, Preferences, ScanEvent, Target } from "./types";
-import { hash } from "./util";
+import { hash, scanStop } from "./util";
 
 export interface ScanCtx {
   runId: string;
@@ -41,19 +41,25 @@ export function makeCtx(runId: string, prefs: Preferences, emit: (e: ScanEvent) 
       emit({ type: "finding", finding, targetId });
     },
     async step(layer, check, label, fn, targetId) {
-      emit({ type: "check-start", layer, check, label, targetId });
       const t0 = Date.now();
       let status: "ok" | "skipped" | "error" = "ok";
       let note: string | undefined;
+      if (scanStop.stopped) {
+        checks.push({ layer, check, targetId, status: "skipped", note: "stopped early", ms: 0 });
+        emit({ type: "check-done", layer, check, targetId, ms: 0, status: "skipped", note: "stopped early" });
+        return;
+      }
+      emit({ type: "check-start", layer, check, label, targetId });
       try {
         const r = await fn();
+        if (scanStop.stopped) throw new Error("stopped early");
         if (typeof r === "string") {
           status = "skipped";
           note = r;
         }
       } catch (e: any) {
-        status = "error";
-        note = String(e?.message ?? e).slice(0, 300);
+        status = scanStop.stopped ? "skipped" : "error";
+        note = scanStop.stopped ? "stopped early" : String(e?.message ?? e).slice(0, 300);
       }
       const ms = Date.now() - t0;
       checks.push({ layer, check, targetId, status, note, ms });

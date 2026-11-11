@@ -2,6 +2,36 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Main window",
-  "windows": ["main"],
-  "permissions": ["core:default", "opener:allow-open-url"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://checkout.stripe.com/*"
+        },
+        {
+          "url": "https://billing.stripe.com/*"
+        },
+        {
+          "url": "https://lockdown.westwardconsulting.ai/*"
+        },
+        {
+          "url": "https://lockdown-staging.westwardconsulting.ai/*"
+        },
+        {
+          "url": "https://westwardconsulting.ai/*"
+        },
+        {
+          "url": "https://mail.google.com/*"
+        },
+        {
+          "url": "https://github.com/*"
+        }
+      ]
+    }
+  ]
 }

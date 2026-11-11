@@ -34,6 +34,8 @@ export interface State {
   activeChecks: { key: string; layer: Layer; label: string }[];
   feed: { at: number; text: string; layer: Layer; tone?: "found" | "ok" | "skip" }[];
   checksDone: number;
+  /** About how many checks this scan runs (from the engine once it knows the projects on disk). */
+  checksTotal?: number;
   summary?: ScanSummary;
   scoreBefore?: number;
   plan: Record<string, PlanRow>;
@@ -68,6 +70,8 @@ export function reduce(s: State, e: Ev): State {
       return { ...initialState(), phase: "scanning", runId: e.runId, startedAt: Date.now(), layerStatus: Object.fromEntries(LAYERS.map((l) => [l.id, e.layers.includes(l.id) ? "waiting" : "done"])) as State["layerStatus"] };
     case "target":
       return { ...s, targets: [...s.targets, e.target] };
+    case "plan":
+      return { ...s, checksTotal: e.total };
     case "check-start": {
       const key = `${e.check}|${e.targetId ?? ""}`;
       return { ...s, layerStatus: { ...s.layerStatus, [e.layer]: "checking" }, activeChecks: [...s.activeChecks.filter((c) => c.key !== key), { key, layer: e.layer, label: e.label }] };

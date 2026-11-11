@@ -89,6 +89,8 @@ export type ScanEvent =
   | { type: "finding"; finding: Finding; targetId?: string }
   | { type: "check-done"; layer: Layer; check: string; targetId?: string; ms: number; status: "ok" | "skipped" | "error"; note?: string }
   | { type: "progress"; done: number; total: number }
+  /** About how many checks this scan will run, once the projects on disk are known. */
+  | { type: "plan"; total: number }
   | { type: "done"; at: string; summary: ScanSummary };
 
 export interface ScanSummary {
@@ -101,6 +103,8 @@ export interface ScanSummary {
   checksRun: number;
   checksSkipped: number;
   fixable: number;
+  /** The person stopped the check early, so some things weren't checked. */
+  partial?: boolean;
 }
 
 export interface ScanResult {

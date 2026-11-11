@@ -14,6 +14,8 @@ export function App() {
   const [canFix, setCanFix] = useState(true);
   const [unlock, setUnlock] = useState<null | { approve?: string[]; only?: string[]; keep?: string[] }>(null);
   const [askFolders, setAskFolders] = useState(false);
+  // The website demo can't open settings on the visitor's computer, so its buttons say what the app would do.
+  const [demoNote, setDemoNote] = useState<string | null>(null);
   const started = useRef(false);
 
   // Before a check, macOS folder popups get their own guided step so none appear by surprise mid-scan.
@@ -67,6 +69,11 @@ export function App() {
           {s.summary && s.phase !== "scanning" && <span className="muted small mono">Last check {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
         </div>
       </header>
+      {bridge?.demo && (
+        <p className="demo-banner" role="note">
+          Example with a sample computer. This page doesn't look at your computer. <a href="https://lockdown.westwardconsulting.ai/install" target="_top">Check your own, free</a>
+        </p>
+      )}
       <main className="main">
         <div className="map-wrap">
           <SecurityMap s={s} score={score} selected={layer} onSelect={setLayer} />
@@ -93,9 +100,11 @@ export function App() {
               setLayer={setLayer}
               demo={!!bridge?.demo}
               onScan={startScan}
+              onStop={() => bridge?.stopScan()}
+              paid={canFix}
               onFix={(approve, only, keep) => (canFix ? bridge?.fix(approve, only, keep) : setUnlock({ approve, only, keep }))}
               onUndo={(t) => bridge?.undo(t)}
-              onOpen={(t) => bridge?.openTarget(t)}
+              onOpen={(t) => (bridge?.demo ? setDemoNote("In the app, this button opens the right page on your own computer.") : bridge?.openTarget(t))}
               getQuestions={async () => ((await bridge?.questions()) ?? []) as Question[]}
             />
           )}
@@ -109,6 +118,11 @@ export function App() {
                 bridge.fix(unlock.approve, unlock.only, unlock.keep);
               }}
             />
+          )}
+          {demoNote && (
+            <p className="fine demo-note" role="status">
+              {demoNote}
+            </p>
           )}
           {s.error && <p className="error small">{s.error}</p>}
         </div>

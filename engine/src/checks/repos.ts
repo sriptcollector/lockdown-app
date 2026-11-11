@@ -20,9 +20,9 @@ export interface RepoMeta {
   gh?: { owner: string; repo: string; private: boolean; fork: boolean; stars: number; pages: boolean; defaultBranch: string } | null;
 }
 
-async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
+async function pool<T>(items: T[], n: number, fn: (x: T, i: number) => Promise<void>) {
   let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) await fn(items[i++]); }));
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; await fn(items[k], k); } }));
 }
 
 export async function discoverRepos(ctx: ScanCtx): Promise<RepoMeta[]> {
@@ -44,24 +44,62 @@ export async function discoverRepos(ctx: ScanCtx): Promise<RepoMeta[]> {
   return metas;
 }
 
-export async function scanRepos(ctx: ScanCtx, repos: RepoMeta[]) {
-  if (!repos.length) return;
+export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
+  if (!all.length) return;
+  // Projects the last scan ran out of time for go first this time, so "Check again" picks up where it stopped.
+  const lateFile = join(dataDir(), "code-late.json");
+  const lastLate = new Set<string>(existsSync(lateFile) ? JSON.parse(readFileSync(lateFile, "utf8")) : []);
+  const repos = [...all.filter((r) => lastLate.has(r.path)), ...all.filter((r) => !lastLate.has(r.path))];
   const tid = (r: RepoMeta) => `repo:${r.path}`;
 
+  // A first check shouldn't take a quarter of an hour on a laptop full of projects: deep checks stop at
+  // the time limit, and whatever didn't fit is named in the results instead of silently missing.
+  const deadline = Date.now() + CODE_BUDGET_MS;
+  const late = new Map<string, string>();
+  const inTime = (r: RepoMeta, fn: () => Promise<void | string>) => () => {
+    if (Date.now() > deadline) {
+      late.set(r.path, r.name);
+      return Promise.resolve("time limit for this check");
+    }
+    return fn();
+  };
+  const n = repos.length;
+  const label = (what: string, r: RepoMeta, i: number) => `${what} in ${r.name} (project ${i + 1} of ${n})`;
+
   // Secrets in code and history, one repo at a time (gitleaks needs a repo per run).
-  await pool(repos, 4, async (r) => {
-    await ctx.step("code", "code.secrets", `Leaked keys in ${r.name}`, () => gitleaksRepo(ctx, r), tid(r));
+  await pool(repos, 4, async (r, i) => {
+    await ctx.step("code", "code.secrets", label("Leaked keys", r, i), inTime(r, () => gitleaksRepo(ctx, r)), tid(r));
   });
 
-  // Dependencies and code patterns run once across every repo.
+  // Dependencies are looked up once across every repo.
   await ctx.step("code", "code.deps", "Known-vulnerable packages", () => osvAll(ctx, repos));
-  await ctx.step("code", "code.patterns", "Injection, auth, CORS, debug endpoints", () => opengrepAll(ctx, repos));
 
-  await pool(repos, 6, async (r) => {
-    await ctx.step("code", "code.reverse", `Reverse-engineering exposure in ${r.name}`, async () => reverseChecks(ctx, r), tid(r));
-    await ctx.step("code", "code.config", `Config and workflows in ${r.name}`, async () => configChecks(ctx, r), tid(r));
+  // Code patterns per repo, so progress is real and one huge project can't stall the rest.
+  await pool(repos, 2, async (r, i) => {
+    await ctx.step("code", "code.patterns", label("Unsafe code", r, i), inTime(r, () => opengrepRepo(ctx, r)), tid(r));
   });
+
+  await pool(repos, 6, async (r, i) => {
+    await ctx.step("code", "code.reverse", label("Reverse-engineering exposure", r, i), async () => reverseChecks(ctx, r), tid(r));
+    await ctx.step("code", "code.config", label("Config and workflows", r, i), async () => configChecks(ctx, r), tid(r));
+  });
+
+  writeFileSync(lateFile, JSON.stringify([...late.keys()]));
+  if (late.size) {
+    const names = [...new Set(late.values())];
+    ctx.report({
+      layer: "code",
+      check: "code.not-checked",
+      severity: "info",
+      title: `${names.length === 1 ? "1 project wasn't" : `${names.length} projects weren't`} fully checked for leaked keys and unsafe code`,
+      why: "Deep code checks stop after a few minutes so you get results quickly. Press Check again and Lockdown starts with these projects.",
+      evidence: names.slice(0, 8).join(", ") + (names.length > 8 ? ` and ${names.length - 8} more` : ""),
+    });
+  }
 }
+
+/** Deep code checks (leaked keys, unsafe code) get this long in one scan. */
+const CODE_BUDGET_MS = Number(process.env.LOCKDOWN_CODE_BUDGET_MS) || 5 * 60_000;
 
 const report = (ctx: ScanCtx, r: RepoMeta, f: F) => ctx.report({ layer: "code", ...f }, `repo:${r.path}`);
 
@@ -200,13 +238,17 @@ async function osvAll(ctx: ScanCtx, repos: RepoMeta[]): Promise<void | string> {
   }
 }
 
-async function opengrepAll(ctx: ScanCtx, repos: RepoMeta[]): Promise<void | string> {
+async function opengrepRepo(ctx: ScanCtx, repo: RepoMeta): Promise<void | string> {
+  return opengrepAll(ctx, [repo], 120_000);
+}
+
+async function opengrepAll(ctx: ScanCtx, repos: RepoMeta[], timeoutMs = 900_000): Promise<void | string> {
   const bin = await ensureTool("opengrep");
   if (!bin) return "Opengrep isn't available for this computer";
   const rules = join(dataDir("tmp"), "lockdown-rules.yml");
   writeFileSync(rules, rulesYml);
-  const out = join(dataDir("tmp"), `opengrep-${ctx.runId}.json`);
-  const r = await run(bin, ["scan", "--config", rules, "--json", "--output", out, "--quiet", "--timeout", "10", "--max-target-bytes", "1000000", "--exclude", "*.min.js", "--exclude", "dist", "--exclude", "build", "--exclude", ".next", "--exclude", "test*", "--exclude", "*.test.*", "--exclude", "*.spec.*", ...repos.map((x) => x.path)], { timeoutMs: 900_000 });
+  const out = join(dataDir("tmp"), `opengrep-${ctx.runId}-${hash(repos.map((x) => x.path).join("|"))}.json`);
+  const r = await run(bin, ["scan", "--config", rules, "--json", "--output", out, "--quiet", "--timeout", "10", "--max-target-bytes", "1000000", "--exclude", "*.min.js", "--exclude", "dist", "--exclude", "build", "--exclude", ".next", "--exclude", "test*", "--exclude", "*.test.*", "--exclude", "*.spec.*", ...repos.map((x) => x.path)], { timeoutMs });
   let data: any;
   try {
     data = JSON.parse(readFileSync(out, "utf8"));

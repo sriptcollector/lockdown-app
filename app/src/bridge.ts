@@ -8,6 +8,8 @@ export interface Bridge {
   onEvent(fn: (e: Ev) => void): () => void;
   state(): Promise<any>;
   scan(): Promise<void>;
+  /** Stop a running check and show what it found so far. */
+  stopScan(): Promise<void>;
   fix(approve?: string[], only?: string[], keep?: string[]): Promise<void>;
   questions(): Promise<any[]>;
   openTarget(target: string): Promise<void>;
@@ -69,13 +71,22 @@ export async function connect(): Promise<Bridge> {
     onEvent: (fn) => (subs.add(fn), () => subs.delete(fn)),
     state: () => call("/state"),
     scan: () => call("/scan", {}),
+    stopScan: () => call("/scan/stop", {}),
     fix: (approve, only, keep) => call("/fix", { approve, only, keep }),
     questions: () => call("/questions"),
     openTarget: (target) => call("/open", { target }),
     undo: (target) => call("/undo", { target }),
     savePrefs: (p) => call("/prefs", p),
     account: (b) => (b.action === "refresh" ? call("/account") : call("/account", b)),
-    open: openUrl,
+    // The window may only open a short list of sites; anything else goes through the engine, which opens
+    // the default browser for https links.
+    open: async (url) => {
+      try {
+        await openUrl(url);
+      } catch {
+        await call("/open", { target: url });
+      }
+    },
     permissions: () => call("/permissions"),
     requestFolder: (id) => call("/permissions/request", { id }),
     recheckFolders: () => call("/permissions/recheck", {}),
@@ -112,6 +123,7 @@ function demoBridge(subs: Set<(e: Ev) => void>, emit: (e: Ev) => void): Bridge {
     state: async () => ({ prefs, latest: null, runs: [], busy: null, canFix: true }),
     account: async () => ({ canFix: true, plan: "pro", checkoutOpen: false }),
     open: openUrl,
+    stopScan: async () => {},
     scan: async () => {
       lastFindings = [];
       // ?demo&instant jumps straight to results (for screenshots); otherwise it plays in real time.

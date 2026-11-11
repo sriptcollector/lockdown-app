@@ -2,7 +2,7 @@
 // passes in a header. Streams scan and fix events as server-sent events.
 import { randomBytes } from "node:crypto";
 import { applyPlan, latestScan, listRuns, loadJournal, makePlan, questionsFor, undo } from "./fix";
-import { IS_MAC, IS_WIN, run } from "./util";
+import { IS_MAC, IS_WIN, run, scanStop } from "./util";
 import { account, canFix } from "./license";
 import { foldersAnswered, protectedFolders, recheckDenied, requestFolder } from "./permissions";
 import { loadPrefs, savePrefs } from "./prefs";
@@ -70,6 +70,11 @@ export function serve(port = 0, token = process.env.LOCKDOWN_TOKEN || randomByte
         const body = (await req.json().catch(() => ({}))) as { layers?: Layer[] };
         busy = "scan";
         runScan(loadPrefs(), broadcast, body.layers ?? (process.env.LOCKDOWN_LAYERS?.split(",") as Layer[] | undefined)).then((r) => account.summary({ score: r.summary.score, platform: r.summary.platform, counts: r.summary.counts })).catch((e) => broadcast({ type: "error", message: String(e?.message ?? e) })).finally(() => (busy = null));
+        return json({ ok: true });
+      }
+      if (url.pathname === "/scan/stop" && req.method === "POST") {
+        // "Stop and show what's found so far": running tools end now; the scan finishes with what it has.
+        if (busy === "scan") scanStop.stop();
         return json({ ok: true });
       }
       if (url.pathname === "/questions") {

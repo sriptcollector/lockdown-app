@@ -12,6 +12,7 @@ export function Unlock({ bridge, onUnlocked, onClose }: { bridge: Bridge; onUnlo
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
     setErr(null);
@@ -119,22 +120,33 @@ export function Unlock({ bridge, onUnlocked, onClose }: { bridge: Bridge; onUnlo
             onClick={() =>
               act(async () => {
                 const r = await bridge.account({ action: "checkout", plan });
-                if (r.url) {
-                  await bridge.open(r.url);
-                  setStep("waiting");
-                } else setNote(r.error ?? "Checkout didn't open. Please try again.");
+                if (!r.url) throw new Error("Checkout didn't open. Please try again.");
+                setCheckoutUrl(r.url);
+                setStep("waiting");
+                // If the browser can't be opened for some reason, the waiting step shows the link to click.
+                await bridge.open(r.url).catch(() => setNote("Your browser didn't open by itself."));
               })
             }
           >
             {busy ? "Opening…" : "Start free week"}
           </button>
-          {note && <p className="small">{note}</p>}
+
         </>
       )}
       {step === "waiting" && (
-        <p className="small muted">
-          <span className="spinner" aria-hidden /> Finish checkout in your browser. Fixing unlocks here as soon as it's done.
-        </p>
+        <>
+          <p className="small muted">
+            <span className="spinner" aria-hidden /> Finish checkout in your browser. Fixing unlocks here as soon as it's done.
+          </p>
+          {checkoutUrl && (
+            <p className="small">
+              {note ?? "Browser didn't open?"}{" "}
+              <button className="textlink" onClick={() => bridge.openTarget(checkoutUrl)}>
+                Open checkout
+              </button>
+            </p>
+          )}
+        </>
       )}
       {err && <p className="small error-text">{err}</p>}
     </div>

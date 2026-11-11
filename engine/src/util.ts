@@ -38,6 +38,22 @@ function winPsModulePath(): string {
   return [join(homedir(), "Documents", "WindowsPowerShell", "Modules"), join(pf, "WindowsPowerShell", "Modules"), join(root, "System32", "WindowsPowerShell", "v1.0", "Modules")].join(";");
 }
 
+// "Stop and show what's found so far": every tool a scan starts is tracked so stopping ends them at once.
+const live = new Set<import("node:child_process").ChildProcess>();
+let stopping = false;
+export const scanStop = {
+  get stopped() {
+    return stopping;
+  },
+  stop() {
+    stopping = true;
+    for (const c of live) c.kill();
+  },
+  reset() {
+    stopping = false;
+  },
+};
+
 export function run(
   cmd: string,
   args: string[],
@@ -58,6 +74,7 @@ export function run(
       resolve({ code: -1, stdout: "", stderr: String(e), timedOut: false });
       return;
     }
+    live.add(child);
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill();
@@ -65,10 +82,12 @@ export function run(
     child.stdout?.on("data", (d) => (stdout += d));
     child.stderr?.on("data", (d) => (stderr += d));
     child.on("error", (e) => {
+      live.delete(child);
       clearTimeout(timer);
       resolve({ code: -1, stdout, stderr: stderr + String(e), timedOut });
     });
     child.on("close", (code) => {
+      live.delete(child);
       clearTimeout(timer);
       resolve({ code: code ?? -1, stdout, stderr, timedOut });
     });
