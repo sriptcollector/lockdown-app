@@ -1,0 +1,25 @@
+name: Which check asks about the local network
+# One-off: run each part of the check alone on a fresh Mac and watch for macOS's
+# "Allow Lockdown to find devices on local networks?" popup.
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  layer:
+    strategy:
+      fail-fast: false
+      matrix:
+        layer: [system, network, files, apps, code, github, cloud]
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: curl -fsSL https://lockdown.westwardconsulting.ai/beta/install.sh | sh; sleep 6; pkill -f Lockdown.app || true
+      - name: Run one part and watch for the popup
+        run: |
+          APP=/Applications/Lockdown.app; [ -d "$APP" ] || APP="$HOME/Applications/Lockdown.app"
+          open --env LOCKDOWN_LAYERS=${{ matrix.layer }} --env LOCKDOWN_REPOS="$GITHUB_WORKSPACE" "$APP"; sleep 8
+          AX() { osascript -l JavaScript engine/test/first-run/ax.js "$@"; }
+          AX click "Check my computer" 60 Lockdown
+          AX click "Continue" 10 Lockdown || true
+          if AX find "find devices on local networks" 240; then echo "POPUP: ${{ matrix.layer }} asks for the local network"; screencapture -x popup.png; else echo "no popup: ${{ matrix.layer }}"; fi
