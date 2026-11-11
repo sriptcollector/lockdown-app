@@ -90,7 +90,7 @@ export async function applyPlan(plan: PlanItem[], prefs: Preferences, emit: (e: 
   }
   // One admin prompt for everything that needs it.
   const queued = ctx.admin.steps.map((s) => s.id);
-  if (queued.length) emit({ type: "admin-prompt", count: queued.length });
+  ctx.admin.onPrompt = () => emit({ type: "admin-prompt", count: queued.length });
   await ctx.admin.flush();
   for (const id of queued) {
     const ch = changes.find((c) => c.findingId === id)!;

@@ -47,12 +47,18 @@ export const scanStop = {
   },
   stop() {
     stopping = true;
-    for (const c of live) c.kill();
+    for (const c of live) killTree(c);
   },
   reset() {
     stopping = false;
   },
 };
+
+/** Scanners start helpers of their own; on Windows, ending only the parent leaves them running. */
+function killTree(c: import("node:child_process").ChildProcess) {
+  if (IS_WIN && c.pid) spawn("taskkill", ["/pid", String(c.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+  else c.kill();
+}
 
 export function run(
   cmd: string,
@@ -77,7 +83,7 @@ export function run(
     live.add(child);
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      killTree(child);
     }, opts.timeoutMs ?? 120_000);
     child.stdout?.on("data", (d) => (stdout += d));
     child.stderr?.on("data", (d) => (stderr += d));

@@ -1,6 +1,6 @@
 // Code layer: leaked secrets (gitleaks), vulnerable dependencies (OSV-Scanner), insecure code
 // (Opengrep with Lockdown's rules), and how easy the app is to reverse-engineer.
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import type { ScanCtx } from "../context";
 import type { Finding, Severity } from "../types";
@@ -49,16 +49,27 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
   // Projects the last scan ran out of time for go first this time, so "Check again" picks up where it stopped.
   const lateFile = join(dataDir(), "code-late.json");
   const lastLate = new Set<string>(existsSync(lateFile) ? JSON.parse(readFileSync(lateFile, "utf8")) : []);
-  const repos = [...all.filter((r) => lastLate.has(r.path)), ...all.filter((r) => !lastLate.has(r.path))];
+  // Then the projects worked on most recently: they're the ones most likely to be live.
+  const touched = (r: RepoMeta) => {
+    try {
+      return statSync(join(r.path, ".git", "index")).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  const recent = (a: RepoMeta, b: RepoMeta) => touched(b) - touched(a);
+  const repos = [...all.filter((r) => lastLate.has(r.path)).sort(recent), ...all.filter((r) => !lastLate.has(r.path)).sort(recent)];
   const tid = (r: RepoMeta) => `repo:${r.path}`;
 
   // A first check shouldn't take a quarter of an hour on a laptop full of projects: deep checks stop at
   // the time limit, and whatever didn't fit is named in the results instead of silently missing.
   const deadline = Date.now() + CODE_BUDGET_MS;
   const late = new Map<string, string>();
-  const inTime = (r: RepoMeta, fn: () => Promise<void | string>) => () => {
+  const lateKinds = new Set<string>();
+  const inTime = (r: RepoMeta, kind: string, fn: () => Promise<void | string>) => () => {
     if (Date.now() > deadline) {
       late.set(r.path, r.name);
+      lateKinds.add(kind);
       return Promise.resolve("time limit for this check");
     }
     return fn();
@@ -66,17 +77,17 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
   const n = repos.length;
   const label = (what: string, r: RepoMeta, i: number) => `${what} in ${r.name} (project ${i + 1} of ${n})`;
 
+  // Dependencies are looked up once across every repo, alongside the per-project checks.
+  const deps = ctx.step("code", "code.deps", "Known-vulnerable packages", () => osvAll(ctx, repos));
+
   // Secrets in code and history, one repo at a time (gitleaks needs a repo per run).
   await pool(repos, 4, async (r, i) => {
-    await ctx.step("code", "code.secrets", label("Leaked keys", r, i), inTime(r, () => gitleaksRepo(ctx, r)), tid(r));
+    await ctx.step("code", "code.secrets", label("Leaked keys", r, i), inTime(r, "leaked keys", () => gitleaksRepo(ctx, r)), tid(r));
   });
-
-  // Dependencies are looked up once across every repo.
-  await ctx.step("code", "code.deps", "Known-vulnerable packages", () => osvAll(ctx, repos));
 
   // Code patterns per repo, so progress is real and one huge project can't stall the rest.
   await pool(repos, 2, async (r, i) => {
-    await ctx.step("code", "code.patterns", label("Unsafe code", r, i), inTime(r, () => opengrepRepo(ctx, r)), tid(r));
+    await ctx.step("code", "code.patterns", label("Unsafe code", r, i), inTime(r, "unsafe code", () => opengrepRepo(ctx, r)), tid(r));
   });
 
   await pool(repos, 6, async (r, i) => {
@@ -84,6 +95,7 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
     await ctx.step("code", "code.config", label("Config and workflows", r, i), async () => configChecks(ctx, r), tid(r));
   });
 
+  await deps;
   writeFileSync(lateFile, JSON.stringify([...late.keys()]));
   if (late.size) {
     const names = [...new Set(late.values())];
@@ -91,7 +103,7 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
       layer: "code",
       check: "code.not-checked",
       severity: "info",
-      title: `${names.length === 1 ? "1 project wasn't" : `${names.length} projects weren't`} fully checked for leaked keys and unsafe code`,
+      title: `${names.length === 1 ? "1 project wasn't" : `${names.length} projects weren't`} checked for ${[...lateKinds].join(" or ")} yet`,
       why: "Deep code checks stop after a few minutes so you get results quickly. Press Check again and Lockdown starts with these projects.",
       evidence: names.slice(0, 8).join(", ") + (names.length > 8 ? ` and ${names.length - 8} more` : ""),
     });
@@ -99,7 +111,8 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
 }
 
 /** Deep code checks (leaked keys, unsafe code) get this long in one scan. */
-const CODE_BUDGET_MS = Number(process.env.LOCKDOWN_CODE_BUDGET_MS) || 5 * 60_000;
+const CODE_BUDGET_MS = Number(process.env.LOCKDOWN_CODE_BUDGET_MS) || 3 * 60_000;
+const LOCKFILES = new Set(["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "requirements.txt", "poetry.lock", "Pipfile.lock", "uv.lock", "Cargo.lock", "go.sum", "Gemfile.lock", "composer.lock", "pubspec.lock", "mix.lock"]);
 
 const report = (ctx: ScanCtx, r: RepoMeta, f: F) => ctx.report({ layer: "code", ...f }, `repo:${r.path}`);
 
@@ -194,14 +207,22 @@ function rotateText(rule?: { name: string; rotate?: string }) {
 async function osvAll(ctx: ScanCtx, repos: RepoMeta[]): Promise<void | string> {
   const bin = await ensureTool("osv-scanner");
   if (!bin) return "OSV-Scanner isn't available for this computer";
-  const out = join(dataDir("tmp"), `osv-${ctx.runId}.json`);
-  await run(bin, ["scan", "source", "--format", "json", "--output", out, "-r", ...repos.map((r) => r.path)], { timeoutMs: 600_000 });
-  let data: any;
-  try {
-    data = JSON.parse(readFileSync(out, "utf8"));
-  } catch {
-    return "couldn't read OSV results";
-  }
+  // Hand OSV the lockfiles directly instead of letting it crawl every folder (much faster on big drives).
+  const locks = repos.flatMap((r) => walk(r.path, { maxDepth: 4, match: (n, _f, isDir) => !isDir && LOCKFILES.has(n), limit: 50 }));
+  if (!locks.length) return "no lockfiles to check";
+  const batches: string[][] = [];
+  for (let i = 0; i < locks.length; i += 40) batches.push(locks.slice(i, i + 40));
+  const data: any = { results: [] };
+  let read = 0;
+  await pool(batches, 3, async (b, i) => {
+    const out = join(dataDir("tmp"), `osv-${ctx.runId}-${i}.json`);
+    await run(bin, ["scan", "source", "--format", "json", "--output", out, ...b.flatMap((l) => ["-L", l])], { timeoutMs: 180_000 });
+    try {
+      data.results.push(...(JSON.parse(readFileSync(out, "utf8")).results ?? []));
+      read++;
+    } catch {}
+  });
+  if (!read) return "couldn't read OSV results";
   // One finding per repo, covering every lockfile in it.
   const byRepo = new Map<RepoMeta, { lockfiles: string[]; pkgs: Map<string, { name: string; version: string; ids: string[]; sev: number; fixed?: string }> }>();
   for (const res of data.results ?? []) {

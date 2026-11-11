@@ -13,6 +13,18 @@ export function Unlock({ bridge, onUnlocked, onClose }: { bridge: Bridge; onUnlo
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  // Already signed in? Skip straight to the plan.
+  useEffect(() => {
+    bridge
+      .account({ action: "refresh" })
+      .then((a) => {
+        if (a?.signedIn) {
+          if (a.email) setEmail(a.email);
+          setStep((s) => (s === "email" ? "plan" : s));
+        }
+      })
+      .catch(() => {});
+  }, []);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
     setErr(null);

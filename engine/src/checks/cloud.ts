@@ -19,6 +19,12 @@ async function gcloud(args: string[], timeoutMs = 60_000): Promise<any | null> {
   }
 }
 
+// gcloud takes a few seconds per call, so projects, accounts and buckets are looked at side by side.
+async function each<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) await fn(items[i++]); }));
+}
+
 export async function scanCloud(ctx: ScanCtx) {
   const report = (f: F, t = "cloud") => ctx.report({ layer: "cloud", ...f }, t);
 
@@ -29,13 +35,13 @@ export async function scanCloud(ctx: ScanCtx) {
     if (!active) return "Google Cloud CLI isn't signed in";
     ctx.target({ kind: "cloud", id: "gcp", name: "Google Cloud", layer: "cloud" });
     const projects = ((await gcloud(["projects", "list", "--limit=8"], 60_000)) ?? []) as any[];
-    for (const p of projects) {
+    await each(projects, 4, async (p) => {
       const pid = p.projectId;
       const tid = `gcp:${pid}`;
       ctx.target({ kind: "cloud", id: tid, name: pid, layer: "cloud" });
       await ctx.step("cloud", "gcp.project", `${pid}: keys and buckets`, async () => {
         const [sas, buckets] = await Promise.all([gcloud(["iam", "service-accounts", "list", `--project=${pid}`]), gcloud(["storage", "buckets", "list", `--project=${pid}`], 90_000)]);
-        for (const sa of (sas ?? []) as any[]) {
+        await each((sas ?? []) as any[], 6, async (sa) => {
           const keys = ((await gcloud(["iam", "service-accounts", "keys", "list", `--iam-account=${sa.email}`, "--managed-by=user", `--project=${pid}`])) ?? []) as any[];
           for (const k of keys.filter((k) => !k.disabled)) {
             const ageDays = Math.floor((Date.now() - Date.parse(k.validAfterTime)) / 864e5);
@@ -49,12 +55,12 @@ export async function scanCloud(ctx: ScanCtx) {
               fix: { fixer: "gcp.key-disable", action: "Turn the key off (can be turned back on)", params: { project: pid, account: sa.email, key: String(k.name).split("/").pop() } },
             }, tid);
           }
-        }
-        for (const b of (buckets ?? []) as any[]) {
+        });
+        await each((buckets ?? []) as any[], 6, async (b) => {
           const name = b.name ?? String(b.storage_url ?? "").replace(/^gs:\/\/|\/$/g, "");
           const pol = await gcloud(["storage", "buckets", "get-iam-policy", `gs://${name}`]);
           const pubRoles = ((pol?.bindings ?? []) as any[]).filter((x) => (x.members ?? []).some((m: string) => m === "allUsers" || m === "allAuthenticatedUsers"));
-          if (!pubRoles.length) continue;
+          if (!pubRoles.length) return;
           const canWrite = pubRoles.some((x) => /admin|objectCreator|objectUser|legacyBucketWriter|storage\.objectAdmin/i.test(x.role));
           report({
             check: "gcp.public-bucket",
@@ -65,9 +71,9 @@ export async function scanCloud(ctx: ScanCtx) {
             evidence: pubRoles.map((x) => x.role.replace("roles/", "")).join(", "),
             fix: { fixer: "gcp.bucket-private", action: "Remove public access from the bucket", params: { bucket: name, project: pid, roles: pubRoles.map((x) => x.role) } },
           }, tid);
-        }
+        });
       }, tid);
-    }
+    });
     const adc = IS_WIN ? join(process.env.APPDATA ?? "", "gcloud", "application_default_credentials.json") : join(HOME, ".config", "gcloud", "application_default_credentials.json");
     if (existsSync(adc)) {
       report({ check: "gcp.adc", severity: "info", title: "Your Google Cloud login is saved for local apps", why: "Any program on this computer can use it to act as you in Google Cloud. Normal for developers; keep this PC locked down.", where: "application_default_credentials.json", fix: { fixer: "none", action: "Revoke it when you're not developing", params: {}, manual: "Run gcloud auth application-default revoke when you don't need it." } });

@@ -36,6 +36,8 @@ export interface FixCtx {
 // ---------- admin batching ----------
 export class AdminBatch {
   steps: { id: string; script: string }[] = [];
+  /** Called right before the system shows its admin prompt (not when it won't, e.g. already elevated). */
+  onPrompt?: () => void;
   results = new Map<string, { ok: boolean; out: string }>();
   add(id: string, script: string) {
     this.steps.push({ id, script });
@@ -56,7 +58,10 @@ export class AdminBatch {
       writeFileSync(script, `$ErrorActionPreference='Stop'\n$r=@{}\n${body}\n$r | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 '${out}'\n`);
       const elevated = await ps<boolean>("([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) | ConvertTo-Json");
       if (elevated) await run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], { timeoutMs: 600_000 });
-      else await run("powershell.exe", ["-NoProfile", "-Command", `Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','"${script}"'`], { timeoutMs: 600_000 });
+      else {
+        this.onPrompt?.();
+        await run("powershell.exe", ["-NoProfile", "-Command", `Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','"${script}"'`], { timeoutMs: 600_000 });
+      }
     } else if (IS_MAC) {
       const body = steps.map((s) => `if out=$( { ${s.script} ; } 2>&1 ); then ok=true; else ok=false; fi; printf '%s\\t%s\\t%s\\n' '${s.id}' "$ok" "$(printf '%s' "$out" | tr '\\n\\t' '  ')" >> '${out}.tsv'`).join("\n");
       const script = join(dir, `admin-${Date.now()}.sh`);
@@ -65,7 +70,10 @@ export class AdminBatch {
       const root = process.getuid?.() === 0;
       if (root) await run("/bin/sh", [script], { timeoutMs: 600_000 });
       else if ((await run("sudo", ["-n", "true"], { timeoutMs: 10_000 })).code === 0) await run("sudo", ["-n", "/bin/sh", script], { timeoutMs: 600_000 });
-      else await run("osascript", ["-e", `do shell script "/bin/sh '${script}'" with prompt "Lockdown needs your password to apply security fixes." with administrator privileges`], { timeoutMs: 600_000 });
+      else {
+        this.onPrompt?.();
+        await run("osascript", ["-e", `do shell script "/bin/sh '${script}'" with prompt "Lockdown needs your password to apply security fixes." with administrator privileges`], { timeoutMs: 600_000 });
+      }
       if (existsSync(`${out}.tsv`)) {
         for (const line of readFileSync(`${out}.tsv`, "utf8").split("\n").filter(Boolean)) {
           const [id, ok, o] = line.split("\t");
