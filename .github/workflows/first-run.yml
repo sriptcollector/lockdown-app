@@ -1,0 +1,146 @@
+name: First run from default settings
+# A brand-new user's first run on fresh Macs and PCs, recorded on video. Installs the beta with the
+# one-line installer, resets every permission Lockdown could already have, makes admin changes need a
+# real password / a real Yes, then clicks through the real app window and the real system popups like a
+# person: one "Don't Allow" and one "Cancel" on purpose, to prove the way back in works.
+# Video and screenshots go on a "first-run-<run>" pre-release.
+on: workflow_dispatch
+permissions:
+  contents: write
+env:
+  LOCKDOWN_TEST_ACCOUNT: ${{ secrets.LOCKDOWN_TEST_ACCOUNT }}
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install the beta like a customer
+        run: curl -fsSL https://lockdown.westwardconsulting.ai/beta/install.sh | sh; sleep 6; pkill -f Lockdown.app || true
+      - name: Default state (no permissions, admin needs a password)
+        run: |
+          tccutil reset All ai.westwardconsulting.lockdown || true
+          PW="Lk$(openssl rand -hex 8)"; echo "::add-mask::$PW"; echo "PW=$PW" >> "$GITHUB_ENV"
+          sudo dscl . -passwd /Users/runner "$PW"
+          D="$HOME/Library/Application Support/Lockdown"; mkdir -p "$D"; printf '%s' "$LOCKDOWN_TEST_ACCOUNT" > "$D/account.json"; chmod 600 "$D/account.json"
+          mkdir -p ~/Downloads && printf 'name,url,username,password\nbank,https://bank.test,me,hunter2\n' > ~/Downloads/passwords.csv
+          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
+          # Last: take away password-free sudo, like a normal Mac account.
+          for f in $(sudo grep -rlE "NOPASSWD" /etc/sudoers /etc/sudoers.d 2>/dev/null); do sudo sed -i '' 's/NOPASSWD: *//' "$f"; done
+          sudo -k; if sudo -n true 2>/dev/null; then echo "sudo is still password-free"; exit 1; fi
+      - name: First run, like a person
+        run: |
+          AX() { osascript -l JavaScript engine/test/first-run/ax.js "$@"; }
+          shot() { screencapture -x "shots/$1.png"; echo "shot $1"; }
+          step() { echo "::group::$1"; }
+          mkdir -p shots
+          screencapture -v -V 2400 -k shots/first-run-mac.mov & REC=$!
+          APP=/Applications/Lockdown.app; [ -d "$APP" ] || APP="$HOME/Applications/Lockdown.app"
+          open "$APP"; sleep 8; shot 00-opened
+          step "check"; AX click "Check my computer" 90 Lockdown; sleep 1
+          AX find "Your Mac will ask about your folders" 20 Lockdown && shot 01-folder-step
+          AX click "Continue" 10 Lockdown
+          # The real macOS popups, one per folder: Allow, then Don't Allow (Documents), then Allow.
+          n=0
+          while [ $n -lt 6 ]; do
+            if AX find "would like to access" 25 > /tmp/p.txt 2>&1; then
+              cat /tmp/p.txt; shot "02-popup-$n"
+              if [ $n -eq 1 ]; then AX click "Don’t Allow" 5 || AX click "Don't Allow" 5; else AX click "Allow" 5; fi
+              n=$((n+1)); sleep 2
+            else break; fi
+          done
+          echo "answered $n folder popups"
+          if AX find "can't look in" 15 Lockdown; then
+            shot 03-refused
+            AX click "Turn it on in Settings" 10 Lockdown; sleep 5; shot 04-settings-opened
+            AX click "Documents Folder" 30 "System Settings" || AX click "Documents" 10 "System Settings" || true
+            sleep 3; shot 05-switched-on
+            osascript -e 'tell application "Lockdown" to activate'
+          fi
+          AX find "Checking" 60 Lockdown && shot 06-scanning
+          AX find "Fix everything" 1200 Lockdown && shot 07-results
+          step "fix"; AX click "Fix everything" 10 Lockdown; sleep 2
+          for i in 1 2 3 4; do AX click "Next" 3 Lockdown || break; sleep 1; done
+          AX click "Fix everything" 5 Lockdown || true
+          # The admin password box: Cancel first, then the retry, then the password.
+          if AX find "Your Mac is asking for your password" 300 Lockdown; then
+            sleep 2; shot 08-password-box
+            AX click "Cancel" 30 SecurityAgent; sleep 3
+            AX find "still need" 120 Lockdown && shot 09-refused-retry
+            AX click "Try again" 10 Lockdown
+            AX find "Your Mac is asking for your password" 120 Lockdown; sleep 2
+            osascript -e "tell application \"System Events\" to keystroke \"$PW\""
+            AX click "OK" 20 SecurityAgent
+          fi
+          AX find "safe" 900 Lockdown || AX find "Much safer" 30 Lockdown; sleep 2; shot 10-done
+          kill -INT $REC; wait $REC || true
+          ls -la shots
+      - name: Attach video and screenshots
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="first-run-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "First run ${GITHUB_RUN_NUMBER}" --notes "Default-state first run: video and screenshots" || true
+          for f in shots/*; do cp "$f" "/tmp/mac-$(basename "$f")"; gh release upload "$tag" "/tmp/mac-$(basename "$f")" --clobber || true; done
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install the beta like a customer
+        shell: powershell
+        run: |
+          irm https://lockdown.westwardconsulting.ai/beta/install.ps1 | iex
+          Start-Sleep 8; Get-Process lockdown* -ErrorAction SilentlyContinue | Stop-Process -Force
+      - name: Default state (admin changes need a real Yes)
+        shell: powershell
+        run: |
+          # Windows' default: ask before letting apps make changes, on the normal desktop so it can be recorded.
+          Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -Value 5
+          Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name PromptOnSecureDesktop -Value 0
+          [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'Lockdown\account.json'), $env:LOCKDOWN_TEST_ACCOUNT)
+          Set-NetFirewallProfile -Profile Public -Enabled False
+          New-Item -ItemType Directory -Force "$HOME\Downloads" | Out-Null
+          "name,url,username,password`nbank,https://bank.test,me,hunter2" | Set-Content "$HOME\Downloads\Chrome Passwords.csv"
+          choco install ffmpeg -y --no-progress | Out-Null
+      - name: First run, like a person
+        shell: powershell
+        run: |
+          $U = "engine\test\first-run\uia.ps1"
+          function UI($a, $l, $w = "", $t = 60) { & powershell -NoProfile -File $U $a $l -Window $w -Timeout $t | Out-Host; return ($LASTEXITCODE -eq 0) }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          New-Item -ItemType Directory -Force shots | Out-Null
+          function Shot($n) { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height; [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bmp.Save("shots\$n.png"); "shot $n" }
+          $rec = Start-Process ffmpeg -ArgumentList '-y','-f','gdigrab','-framerate','8','-i','desktop','-pix_fmt','yuv420p','shots\first-run-win.mkv' -PassThru -WindowStyle Hidden
+          # Started from Explorer, like double-clicking it: not elevated.
+          Start-Process explorer.exe (Join-Path $env:LOCALAPPDATA 'Lockdown\lockdown.exe'); Start-Sleep 12; Shot 00-opened
+          UI click "Check my computer" Lockdown 90 | Out-Host
+          if (UI find "Fix everything" Lockdown 1200) { Shot 01-results }
+          UI click "Fix everything" Lockdown 10 | Out-Host; Start-Sleep 2
+          foreach ($i in 1..4) { if (-not (UI click "Next" Lockdown 3)) { break }; Start-Sleep 1 }
+          UI click "Fix everything" Lockdown 5 | Out-Host
+          # The real Windows prompt: No first, then the retry, then Yes.
+          if (UI find "Windows is asking for your OK" Lockdown 300) {
+            Start-Sleep 3; Shot 02-admin-ask
+            UI click "No" "User Account Control" 60 | Out-Host; Start-Sleep 3
+            if (UI find "still need" Lockdown 120) { Shot 03-refused-retry }
+            UI click "Try again" Lockdown 10 | Out-Host
+            UI find "Windows is asking for your OK" Lockdown 120 | Out-Host; Start-Sleep 3; Shot 04-admin-ask-again
+            UI click "Yes" "User Account Control" 60 | Out-Host
+          }
+          if (-not (UI find "safe" Lockdown 900)) { UI find "Much safer" Lockdown 30 | Out-Null }
+          Start-Sleep 2; Shot 05-done
+          Stop-Process -Id $rec.Id; Start-Sleep 2
+          ffmpeg -y -i shots\first-run-win.mkv -c copy shots\first-run-win.mp4 2>$null; Remove-Item shots\first-run-win.mkv -ErrorAction SilentlyContinue
+          Get-ChildItem shots
+      - name: Attach video and screenshots
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="first-run-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "First run ${GITHUB_RUN_NUMBER}" --notes "Default-state first run: video and screenshots" || true
+          for f in shots/*; do cp "$f" "/tmp/win-$(basename "$f")"; gh release upload "$tag" "/tmp/win-$(basename "$f")" --clobber || true; done
