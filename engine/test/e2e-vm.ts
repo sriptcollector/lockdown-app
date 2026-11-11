@@ -10,7 +10,9 @@ if (!process.env.CI || !process.env.GITHUB_ACTIONS) throw new Error("e2e-vm only
 const win = platform() === "win32";
 const sh = (c: string) => {
   try {
-    return execSync(c, { stdio: "pipe", shell: win ? "powershell.exe" : "/bin/bash" }).toString();
+    // The runner's default shell is pwsh 7; its module path breaks Windows PowerShell's own cmdlets.
+    const env = win ? { ...process.env, PSModulePath: `${process.env.ProgramFiles}\WindowsPowerShell\Modules;${process.env.SystemRoot}\System32\WindowsPowerShell\v1.0\Modules` } : process.env;
+    return execSync(c, { stdio: "pipe", shell: win ? "powershell.exe" : "/bin/bash", env }).toString();
   } catch (e: any) {
     return String(e.stdout ?? "") + String(e.stderr ?? "");
   }

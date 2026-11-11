@@ -29,6 +29,15 @@ export interface RunResult {
   timedOut: boolean;
 }
 
+// Windows PowerShell 5.1 can't load PowerShell 7's modules. Launched from a pwsh terminal, Lockdown would inherit
+// pwsh's PSModulePath and core cmdlets (Get-ExecutionPolicy, Get-AuthenticodeSignature) would vanish, so checks
+// would quietly miss problems. Give powershell.exe its own default module path.
+function winPsModulePath(): string {
+  const root = process.env.SystemRoot ?? "C:\\Windows";
+  const pf = process.env.ProgramFiles ?? "C:\\Program Files";
+  return [join(homedir(), "Documents", "WindowsPowerShell", "Modules"), join(pf, "WindowsPowerShell", "Modules"), join(root, "System32", "WindowsPowerShell", "v1.0", "Modules")].join(";");
+}
+
 export function run(
   cmd: string,
   args: string[],
@@ -42,7 +51,7 @@ export function run(
     try {
       child = spawn(cmd, args, {
         cwd: opts.cwd,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", ...opts.env },
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", ...(/^powershell(\.exe)?$/i.test(cmd) ? { PSModulePath: winPsModulePath() } : {}), ...opts.env },
         windowsHide: true,
       });
     } catch (e) {
