@@ -37,7 +37,7 @@ jobs:
           shot() { screencapture -x "shots/$1.png"; echo "shot $1"; }
           mkdir -p shots
           # Popup watch: any window from the system's permission or password prompts counts as a failure.
-          ( while true; do osascript -e 'tell application "System Events" to get name of every process whose (name is "SecurityAgent" or name is "UserNotificationCenter" or name is "CoreServicesUIAgent" or name is "universalAccessAuthWarn") and (count of windows) > 0' 2>/dev/null | grep -v '^$' >> popups.txt; sleep 2; done ) & WATCH=$!
+          ( while true; do osascript -e 'tell application "System Events" to get name of every process whose (name is "SecurityAgent" or name is "UserNotificationCenter" or name is "CoreServicesUIAgent" or name is "universalAccessAuthWarn") and (count of windows) > 0' 2>/dev/null | grep -v '^$' >> popups.txt || true; sleep 2; done ) & WATCH=$!
           screencapture -v -V 1200 -k shots/first-run-mac.mov & REC=$!
           APP=/Applications/Lockdown.app; [ -d "$APP" ] || APP="$HOME/Applications/Lockdown.app"
           open "$APP"; sleep 8; shot 00-opened
@@ -49,7 +49,8 @@ jobs:
           AX click "Fix everything" 5 Lockdown || true
           AX find "safe" 300 Lockdown || AX find "Much safer" 30 Lockdown; sleep 2; shot 03-done
           AX find "optional fix" 10 Lockdown && shot 04-optional-list || true
-          kill $WATCH; kill -INT $REC; wait $REC || true
+          kill $WATCH || true; kill -INT $REC || true; wait $REC || true
+          echo "popup watcher checked every 2 s for the whole run" 
           if [ -s popups.txt ]; then echo "POPUPS SEEN:"; sort -u popups.txt; exit 1; else echo "NO POPUPS during the whole run"; fi
       - name: Attach video and screenshots
         if: always()
