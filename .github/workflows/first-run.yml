@@ -63,8 +63,7 @@ jobs:
           kill $WATCH || true; kill -INT $REC || true; wait $REC || true
           echo "popup watcher checked every 2 s for the whole run" 
           # The one allowed prompt is the password box (SecurityAgent). Anything else fails the run.
-          OTHER=$(grep -v "^SecurityAgent$" popups.txt | tr ',' '
-' | sed 's/^ *//' | grep -v "^SecurityAgent$" | grep -v '^$' | sort -u || true)
+          OTHER=$(tr ',' '\n' < popups.txt | sed 's/^ *//' | grep -v "^SecurityAgent$" | grep -v '^$' | sort -u || true)
           if [ -n "$OTHER" ]; then echo "OTHER POPUPS SEEN: $OTHER"; exit 1; else echo "ONLY THE PASSWORD BOX appeared during the whole run"; fi
       - name: Attach video and screenshots
         if: always()
