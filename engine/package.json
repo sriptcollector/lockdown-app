@@ -1,0 +1,12 @@
+{
+  "name": "@lockdown/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "lockdown": "src/cli.ts" },
+  "scripts": {
+    "scan": "bun src/cli.ts scan",
+    "test": "bun test",
+    "build": "bun build src/cli.ts --compile --minify --outfile dist/lockdown-engine"
+  }
+}

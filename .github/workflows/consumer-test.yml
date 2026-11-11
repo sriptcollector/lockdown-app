@@ -1,0 +1,93 @@
+name: Consumer test
+# Installs the published app with the one-line installer on fresh VMs, plants everyday problems,
+# then clicks through it like someone who has never used a computer security tool:
+# one click to check, one click to fix, recommended answers, read the result.
+# Screenshots of every step are attached to a "consumer-test-<run>" pre-release.
+on: workflow_dispatch
+permissions:
+  contents: write
+env:
+  LOCKDOWN_TEST_ACCOUNT: ${{ secrets.LOCKDOWN_TEST_ACCOUNT }}
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install like a customer
+        shell: powershell
+        run: |
+          irm https://lockdown.westwardconsulting.ai/install.ps1 | iex
+          Start-Sleep 8; Get-Process lockdown* -ErrorAction SilentlyContinue | Stop-Process -Force
+      - name: Everyday problems
+        shell: powershell
+        run: |
+          Set-NetFirewallProfile -Profile Public -Enabled False
+          Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name HideFileExt -Value 1
+          New-Item -ItemType Directory -Force "$HOME\Downloads" | Out-Null
+          "name,url,username,password`nbank,https://bank.test,me,hunter2" | Set-Content "$HOME\Downloads\Chrome Passwords.csv"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Open the real app, then click through it
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Lockdown'
+          Start-Process (Join-Path $dir 'lockdown.exe'); Start-Sleep 10
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          New-Item -ItemType Directory -Force shots | Out-Null
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bmp.Save("shots\00-real-app-window.png")
+          Get-Process lockdown* -ErrorAction SilentlyContinue | Stop-Process -Force
+          # Paid like a customer: an account that bought a trial on staging (fake purchase, no card).
+          [IO.File]::WriteAllText((Join-Path $dir 'account.json'), $env:LOCKDOWN_TEST_ACCOUNT); $env:LOCKDOWN_API = 'https://lockdown-staging.westwardconsulting.ai'
+          Start-Process (Join-Path $dir 'lockdown-engine.exe') -ArgumentList 'serve' -RedirectStandardOutput engine.out -WindowStyle Hidden
+          Start-Sleep 5; $info = Get-Content engine.out -TotalCount 1 | ConvertFrom-Json
+          Push-Location app; bun install --frozen-lockfile; ./node_modules/.bin/vite build --outDir "$env:RUNNER_TEMP\ui"; Pop-Location
+          Start-Process python -ArgumentList '-m','http.server','5174','--directory',"$env:RUNNER_TEMP\ui" -WindowStyle Hidden
+          Start-Process "C:\Program Files\Google\Chrome\Application\chrome.exe" -ArgumentList '--headless=new','--remote-debugging-port=9333',"--user-data-dir=$env:RUNNER_TEMP\cdp",'--no-first-run','about:blank'
+          Start-Sleep 5
+          node engine/test/consumer-drive.mjs http://127.0.0.1:9333 shots "http://localhost:5174/?port=$($info.port)&t=$($info.token)"
+      - name: Attach screenshots
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="consumer-test-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots from the consumer test" || true
+          cd shots && for f in *; do mv "$f" "windows-$f"; done && gh release upload "$tag" * --clobber
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Install like a customer
+        run: |
+          curl -fsSL https://lockdown.westwardconsulting.ai/install.sh | sh
+          sleep 8; mkdir -p shots; screencapture -x shots/00-real-app-window.png || true
+          pkill -f Lockdown.app || true
+      - name: Everyday problems
+        run: |
+          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
+          defaults write com.apple.sharingd DiscoverableMode -string Everyone
+          mkdir -p ~/Downloads && printf 'name,url,username,password\nbank,https://bank.test,me,hunter2\n' > ~/Downloads/passwords.csv
+      - name: Click through it
+        run: |
+          APP=/Applications/Lockdown.app; [ -d "$APP" ] || APP="$HOME/Applications/Lockdown.app"
+          D="$HOME/Library/Application Support/Lockdown"; mkdir -p "$D"; printf '%s' "$LOCKDOWN_TEST_ACCOUNT" > "$D/account.json"; chmod 600 "$D/account.json"
+          export LOCKDOWN_API=https://lockdown-staging.westwardconsulting.ai
+          "$APP/Contents/MacOS/lockdown-engine" serve > engine.out 2>/dev/null &
+          sleep 3; PORT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('engine.out','utf8').split('\n')[0]).port)"); TOKEN=$(node -e "console.log(JSON.parse(require('fs').readFileSync('engine.out','utf8').split('\n')[0]).token)")
+          cd app && bun install --frozen-lockfile && ./node_modules/.bin/vite build --outDir /tmp/ui && cd ..
+          (cd /tmp/ui && python3 -m http.server 5174 >/dev/null 2>&1 &)
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --remote-debugging-port=9333 --user-data-dir=/tmp/cdp --no-first-run about:blank >/dev/null 2>&1 &
+          sleep 4
+          node engine/test/consumer-drive.mjs http://127.0.0.1:9333 shots "http://localhost:5174/?port=$PORT&t=$TOKEN"
+      - name: Attach screenshots
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="consumer-test-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --prerelease --title "Consumer test ${GITHUB_RUN_NUMBER}" --notes "Screenshots from the consumer test" || true
+          cd shots && for f in *; do mv "$f" "mac-$f"; done && gh release upload "$tag" * --clobber

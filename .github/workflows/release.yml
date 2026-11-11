@@ -1,0 +1,65 @@
+name: Release
+# Builds the desktop app for Mac (Apple Silicon + Intel) and Windows and attaches it to a GitHub
+# Release. The Lockdown server then copies the files to the public downloads bucket with checksums.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bun: bun-darwin-arm64
+            out: Lockdown-mac-arm64.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bun: bun-darwin-x64
+            out: Lockdown-mac-x64.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bun: bun-windows-x64
+            out: Lockdown-Setup.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Engine
+        shell: bash
+        run: |
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          bun build engine/src/cli.ts --compile --minify --target=${{ matrix.bun }} --outfile "app/src-tauri/binaries/lockdown-engine-${{ matrix.target }}$ext"
+      - name: App
+        working-directory: app
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          ./node_modules/.bin/tauri build --target ${{ matrix.target }} --bundles ${{ runner.os == 'Windows' && 'nsis' || 'app' }}
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp app/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe "out/${{ matrix.out }}"
+          else
+            codesign --verify --deep --strict app/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Lockdown.app
+            tar -czf "out/${{ matrix.out }}" -C app/src-tauri/target/${{ matrix.target }}/release/bundle/macos Lockdown.app
+          fi
+          cd out && (sha256sum "${{ matrix.out }}" 2>/dev/null || shasum -a 256 "${{ matrix.out }}") > "${{ matrix.out }}.sha256"
+      - name: Attach to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"; [ "${GITHUB_REF_TYPE}" = "tag" ] || tag="build-${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "Lockdown $tag" --notes "Desktop builds" || true
+          gh release upload "$tag" out/* --clobber

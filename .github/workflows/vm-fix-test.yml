@@ -1,0 +1,22 @@
+name: VM fix test
+# Real fix-all + undo on throwaway runner VMs. Manual only, to keep CI minutes low.
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  vm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Fix everything, then undo
+        working-directory: engine
+        env:
+          LOCKDOWN_NO_AGENT: "1"
+          LOCKDOWN_TEST_ACCOUNT: ${{ secrets.LOCKDOWN_TEST_ACCOUNT }}
+        run: bun test/e2e-vm.ts

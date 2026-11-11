@@ -1,0 +1,271 @@
+# Lockdown's own code rules, run by Opengrep. Written for the mistakes AI-built apps make most.
+rules:
+  - id: sql-string-concat
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: SQL built by gluing user input into the query string. Someone can rewrite the query and read or wipe your database.
+    metadata: { title: "SQL injection", lockdown_severity: high }
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query(`...${$X}...`, ...)
+          - pattern: $DB.query("..." + $X + "...", ...)
+          - pattern: $DB.execute(`...${$X}...`, ...)
+          - pattern: $DB.raw(`...${$X}...`, ...)
+          - pattern: $DB.$queryRawUnsafe(`...${$X}...`, ...)
+          - pattern: $DB.$executeRawUnsafe(`...${$X}...`, ...)
+          - pattern: sql.unsafe(`...${$X}...`, ...)
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i).*(req|request|params|query|body|input|args|ctx|event|search|form|data|id|name|email).*
+
+  - id: py-sql-format
+    languages: [python]
+    severity: ERROR
+    message: SQL built with string formatting. Use query parameters instead.
+    metadata: { title: "SQL injection", lockdown_severity: high }
+    pattern-either:
+      - pattern: $C.execute(f"...", ...)
+      - pattern: $C.execute("..." % $X, ...)
+      - pattern: $C.execute("...".format(...), ...)
+      - pattern: $C.execute("..." + $X, ...)
+
+  - id: eval-user-input
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Code built from a string and run with eval or new Function. If any user input reaches it, they can run code on your server.
+    metadata: { title: "Code injection", lockdown_severity: high }
+    pattern-either:
+      - pattern: eval($X)
+      - pattern: new Function(..., $X)
+      - pattern: vm.runInThisContext($X)
+
+  - id: shell-exec-template
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: A shell command built from variables. Input with ; or && runs extra commands on your server.
+    metadata: { title: "Command injection", lockdown_severity: high }
+    pattern-either:
+      - pattern: child_process.exec(`...${$X}...`, ...)
+      - pattern: exec(`...${$X}...`, ...)
+      - pattern: execSync(`...${$X}...`, ...)
+      - pattern: child_process.execSync(`...${$X}...`, ...)
+      - pattern: exec("..." + $X, ...)
+      - pattern: execSync("..." + $X, ...)
+
+  - id: py-shell-true
+    languages: [python]
+    severity: ERROR
+    message: subprocess with shell=True and a built command string. Input can run extra commands.
+    metadata: { title: "Command injection", lockdown_severity: high }
+    pattern-either:
+      - pattern: subprocess.$F(f"...", ..., shell=True, ...)
+      - pattern: subprocess.$F("..." + $X, ..., shell=True, ...)
+      - pattern: os.system(f"...")
+      - pattern: os.system("..." + $X)
+
+  - id: cors-wildcard-credentials
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: CORS allows every website and sends cookies. Any site a signed-in user visits can call your API as them.
+    metadata: { title: "Open CORS with credentials", lockdown_severity: high }
+    pattern-either:
+      - pattern: 'cors({..., origin: true, ..., credentials: true, ...})'
+      - pattern: 'cors({..., credentials: true, ..., origin: true, ...})'
+      - pattern: |
+          $RES.setHeader("Access-Control-Allow-Origin", $REQ.headers.origin);
+          ...
+          $RES.setHeader("Access-Control-Allow-Credentials", "true");
+
+  - id: cors-wildcard
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: CORS lets every website call this API. Fine for public data, risky for anything behind a login.
+    metadata: { title: "CORS open to every site", lockdown_severity: low }
+    pattern-either:
+      - pattern: cors()
+      - pattern: '$RES.setHeader("Access-Control-Allow-Origin", "*")'
+      - pattern: '$RES.header("Access-Control-Allow-Origin", "*")'
+
+  - id: jwt-no-verify
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: JWT read without checking its signature. Anyone can forge a token and sign in as any user.
+    metadata: { title: "Login tokens not verified", lockdown_severity: critical }
+    pattern-either:
+      - pattern: jwt.decode($T, ...)
+      - pattern: 'jwt.verify($T, $K, {..., algorithms: [..., "none", ...], ...})'
+      - pattern: 'jwt.verify($T, $K, {..., ignoreExpiration: true, ...})'
+
+  - id: weak-jwt-secret
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: JWTs signed with a short hard-coded secret. It can be guessed offline, and then anyone can sign in as anyone.
+    metadata: { title: "Guessable login secret", lockdown_severity: critical }
+    patterns:
+      - pattern-either:
+          - pattern: jwt.sign($P, "$S", ...)
+          - pattern: jwt.verify($T, "$S", ...)
+      - metavariable-regex:
+          metavariable: $S
+          regex: ^.{0,31}$
+
+  - id: flask-debug
+    languages: [python]
+    severity: ERROR
+    message: Flask debug mode lets anyone who reaches the app run Python on your server through the debugger.
+    metadata: { title: "Debug mode in production", lockdown_severity: critical }
+    pattern-either:
+      - pattern: $APP.run(..., debug=True, ...)
+
+  - id: django-debug
+    languages: [python]
+    severity: WARNING
+    message: DEBUG = True shows your settings, code paths and queries to anyone who hits an error page.
+    metadata: { title: "Debug mode in production", lockdown_severity: high }
+    pattern: DEBUG = True
+
+  - id: express-no-helmet-trust
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Express app with the X-Powered-By header on. It tells attackers exactly what to aim at.
+    metadata: { title: "Server fingerprint exposed", lockdown_severity: low }
+    patterns:
+      - pattern: $APP = express()
+      - pattern-not-inside: |
+          $APP = express();
+          ...
+          $APP.disable("x-powered-by");
+      - pattern-not-inside: |
+          $APP = express();
+          ...
+          $APP.use(helmet(...));
+
+  - id: insecure-cookie
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Session cookie set without httpOnly or secure. Scripts or plain-HTTP networks can steal the session.
+    metadata: { title: "Session cookie can be stolen", lockdown_severity: medium }
+    pattern-either:
+      - pattern: '$RES.cookie($N, $V, {..., httpOnly: false, ...})'
+      - pattern: '$RES.cookie($N, $V, {..., secure: false, ...})'
+
+  - id: dangerous-html
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Raw HTML put on the page. If any of it comes from users, they can run scripts in other people's browsers.
+    metadata: { title: "Cross-site scripting risk", lockdown_severity: low }
+    patterns:
+      - pattern-either:
+          - pattern: '<$EL dangerouslySetInnerHTML={{__html: $X}} />'
+          - pattern: $EL.innerHTML = $X
+          - pattern: document.write($X)
+      - pattern-not: $EL.innerHTML = "..."
+      - pattern-not: $EL.innerHTML = `...`
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i).*(req|query|param|input|user|body|message|comment|content|text|data|html|search|location|hash).*
+      - pattern: v-html
+
+  - id: tls-verify-off
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: HTTPS certificate checks turned off. Anyone on the network can read and change this traffic.
+    metadata: { title: "HTTPS checks disabled", lockdown_severity: high }
+    pattern-either:
+      - pattern: 'new https.Agent({..., rejectUnauthorized: false, ...})'
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+
+  - id: py-tls-verify-off
+    languages: [python]
+    severity: ERROR
+    message: HTTPS certificate checks turned off. Anyone on the network can read and change this traffic.
+    metadata: { title: "HTTPS checks disabled", lockdown_severity: high }
+    pattern: requests.$M(..., verify=False, ...)
+
+  - id: electron-node-integration
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Electron window with Node turned on in the page. Any script that gets onto the page can run programs on the user's computer.
+    metadata: { title: "Desktop app can be taken over", lockdown_severity: high }
+    pattern-either:
+      - pattern: 'new BrowserWindow({..., webPreferences: {..., nodeIntegration: true, ...}, ...})'
+      - pattern: 'new BrowserWindow({..., webPreferences: {..., contextIsolation: false, ...}, ...})'
+      - pattern: 'new BrowserWindow({..., webPreferences: {..., webSecurity: false, ...}, ...})'
+
+  - id: stripe-webhook-unverified
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Stripe webhook handled without checking its signature. Anyone can post a fake "payment succeeded".
+    metadata: { title: "Fake payments accepted", lockdown_severity: high }
+    patterns:
+      - pattern-either:
+          - pattern: |
+              if ($E.type === "checkout.session.completed") { ... }
+      - pattern-not-inside: |
+          $X = $S.webhooks.constructEvent(...);
+          ...
+      - pattern-not-inside: |
+          $X = await $S.webhooks.constructEventAsync(...);
+          ...
+      - pattern-inside: |
+          $E = $REQ.body;
+          ...
+
+  - id: supabase-service-role-client
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Supabase service-role key used in code that runs in the browser. It bypasses every database rule.
+    metadata: { title: "Admin database key in the browser", lockdown_severity: critical }
+    pattern-either:
+      - pattern: createClient($U, process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY, ...)
+      - pattern: createClient($U, import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY, ...)
+
+  - id: open-redirect
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Redirects to a URL taken straight from the request. Phishers use your domain to send people to fake login pages.
+    metadata: { title: "Open redirect", lockdown_severity: medium }
+    pattern-either:
+      - pattern: $RES.redirect($REQ.query.$P)
+      - pattern: $RES.redirect($REQ.body.$P)
+      - pattern: redirect($REQ.nextUrl.searchParams.get($P))
+
+  - id: path-traversal
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: File path built from request input. "../" lets someone read any file on the server, like your .env.
+    metadata: { title: "Path traversal", lockdown_severity: high }
+    pattern-either:
+      - pattern: fs.readFile($REQ.query.$P, ...)
+      - pattern: fs.readFileSync($REQ.query.$P, ...)
+      - pattern: $RES.sendFile($REQ.query.$P, ...)
+      - pattern: fs.readFile(path.join($D, $REQ.params.$P), ...)
+      - pattern: $RES.sendFile(path.join($D, $REQ.params.$P), ...)
+
+  - id: debug-route
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: A debug or admin route with no sign-in check in front of it.
+    metadata: { title: "Exposed admin or debug endpoint", lockdown_severity: high }
+    patterns:
+      - pattern-either:
+          - pattern: $APP.$M("$PATH", ($REQ, $RES) => { ... })
+          - pattern: $APP.$M("$PATH", async ($REQ, $RES) => { ... })
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(get|post|all|use|put|delete)$
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: ^/(api/)?(debug|admin|_debug|internal|env|config|dump|test-email|seed|reset)(/|$)
+
+  - id: math-random-secret
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Math.random() used for a token, code or ID. It's predictable; use crypto.randomUUID() or crypto.getRandomValues().
+    metadata: { title: "Guessable tokens", lockdown_severity: medium }
+    patterns:
+      - pattern: $V = <... Math.random() ...>
+      - metavariable-regex:
+          metavariable: $V
+          regex: (?i).*(token|secret|code|otp|password|session|nonce|key|reset).*
+

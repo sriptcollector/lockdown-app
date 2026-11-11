@@ -1,0 +1,14 @@
+{
+  "name": "lockdown-app",
+  "private": true,
+  "license": "Apache-2.0",
+  "workspaces": [
+    "engine",
+    "app"
+  ],
+  "scripts": {
+    "scan": "bun engine/src/cli.ts scan",
+    "app": "bun run --cwd app dev",
+    "e2e": "sh engine/test/make-sandbox.sh \"$LOCKDOWN_SANDBOX_DIR\" \"$LOCKDOWN_TEST_REPO\" && bun engine/test/e2e-sandbox.ts \"$LOCKDOWN_SANDBOX_DIR\" \"$LOCKDOWN_TEST_REPO\""
+  }
+}
