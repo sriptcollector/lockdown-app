@@ -8,7 +8,9 @@ on: workflow_dispatch
 permissions:
   contents: write
 env:
+  # Mac: an account that already has a trial. Windows: signed in but unpaid, so it buys the trial on staging.
   LOCKDOWN_TEST_ACCOUNT: ${{ secrets.LOCKDOWN_TEST_ACCOUNT }}
+  LOCKDOWN_TEST_SIGNED_IN: ${{ secrets.LOCKDOWN_TEST_SIGNED_IN }}
 jobs:
   mac:
     runs-on: macos-latest
@@ -94,13 +96,17 @@ jobs:
         run: |
           irm https://lockdown.westwardconsulting.ai/beta/install.ps1 | iex
           Start-Sleep 8; Get-Process lockdown* -ErrorAction SilentlyContinue | Stop-Process -Force
-      - name: Default state (admin changes need a real Yes)
+      - name: Default state (admin changes need a real Yes, account not paid yet)
         shell: powershell
         run: |
+          # Signed in on staging but unpaid: the run buys the 7-day trial through the real app (fake purchase on staging).
+          $acct = $env:LOCKDOWN_TEST_SIGNED_IN | ConvertFrom-Json
+          Invoke-RestMethod -Method Post -Uri https://lockdown-staging.westwardconsulting.ai/api/test/reset -Headers @{ authorization = "Bearer $($acct.session)" } | Out-Null
+          [Environment]::SetEnvironmentVariable('LOCKDOWN_API', 'https://lockdown-staging.westwardconsulting.ai', 'User')
           # Windows' default: ask before letting apps make changes, on the normal desktop so it can be recorded.
           Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -Value 5
           Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name PromptOnSecureDesktop -Value 0
-          [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'Lockdown\account.json'), $env:LOCKDOWN_TEST_ACCOUNT)
+          [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'Lockdown\account.json'), $env:LOCKDOWN_TEST_SIGNED_IN)
           Set-NetFirewallProfile -Profile Public -Enabled False
           New-Item -ItemType Directory -Force "$HOME\Downloads" | Out-Null
           "name,url,username,password`nbank,https://bank.test,me,hunter2" | Set-Content "$HOME\Downloads\Chrome Passwords.csv"
@@ -114,13 +120,22 @@ jobs:
           New-Item -ItemType Directory -Force shots | Out-Null
           function Shot($n) { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height; [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bmp.Save("shots\$n.png"); "shot $n" }
           $rec = Start-Process ffmpeg -ArgumentList '-y','-f','gdigrab','-framerate','8','-i','desktop','-pix_fmt','yuv420p','shots\first-run-win.mkv' -PassThru -WindowStyle Hidden
-          # Started from Explorer, like double-clicking it: not elevated.
-          Start-Process explorer.exe (Join-Path $env:LOCALAPPDATA 'Lockdown\lockdown.exe'); Start-Sleep 12; Shot 00-opened
+          # Started like a double-click: a normal, non-admin process (the runner itself is already admin).
+          $act = New-ScheduledTaskAction -Execute (Join-Path $env:LOCALAPPDATA 'Lockdown\lockdown.exe')
+          $who = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+          Register-ScheduledTask -TaskName LockdownFirstRun -Action $act -Principal $who -Force | Out-Null
+          Start-ScheduledTask -TaskName LockdownFirstRun; Start-Sleep 12; Shot 00-opened
           UI click "Check my computer" Lockdown 90 | Out-Host
           if (UI find "Fix everything" Lockdown 1200) { Shot 01-results }
           UI click "Fix everything" Lockdown 10 | Out-Host; Start-Sleep 2
           foreach ($i in 1..4) { if (-not (UI click "Next" Lockdown 3)) { break }; Start-Sleep 1 }
           UI click "Fix everything" Lockdown 5 | Out-Host
+          # Not paid yet: the app offers the trial right there, already signed in.
+          if (UI find "Fix everything with Pro" Lockdown 60) {
+            Start-Sleep 1; Shot 01b-plan
+            UI click "Start free week" Lockdown 10 | Out-Host
+            Start-Sleep 8; Shot 01c-checkout-opened
+          }
           # The real Windows prompt: No first, then the retry, then Yes.
           if (UI find "Windows is asking for your OK" Lockdown 300) {
             Start-Sleep 3; Shot 02-admin-ask
