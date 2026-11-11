@@ -1,0 +1,25 @@
+name: Runner probe
+# One-off: what do fresh runners pre-grant (TCC, UAC), and can they record video and click system dialogs?
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - run: |
+          sw_vers
+          echo "--- user TCC (who has what)"; sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "select service, client, auth_value from access" 2>&1 | head -60
+          echo "--- system TCC"; sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "select service, client, auth_value from access" 2>&1 | head -60
+          echo "--- screen video"; (screencapture -v -V 3 /tmp/probe.mov && ls -la /tmp/probe.mov) 2>&1 | tail -2
+          echo "--- UI scripting"; osascript -e 'tell application "System Events" to get name of every process whose background only is false' 2>&1 | head -3
+          echo "--- open --env"; open --help 2>&1 | grep -i env
+  windows:
+    runs-on: windows-latest
+    steps:
+      - shell: powershell
+        run: |
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' | Select-Object EnableLUA, ConsentPromptBehaviorAdmin, PromptOnSecureDesktop | Format-List
+          ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          whoami /groups | Select-String "Mandatory Label"
+          Get-Command ffmpeg -ErrorAction SilentlyContinue | Select-Object Source
