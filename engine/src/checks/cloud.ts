@@ -9,8 +9,16 @@ type F = Omit<Finding, "id" | "layer">;
 
 const gcloudBin = () => (IS_WIN ? "gcloud.cmd" : "gcloud");
 
+// Without a sign-in, the AWS and Google CLIs go looking for a cloud server's built-in credentials at
+// 169.254.169.254. On a Mac that's "the local network" and makes macOS ask the person about Lockdown.
+// So: only run a CLI that has been signed in on this computer, and switch that lookup off.
+const NO_METADATA = { AWS_EC2_METADATA_DISABLED: "true", NO_GCE_CHECK: "True", GCE_METADATA_HOST: "metadata.invalid" };
+const gcloudConfig = () => process.env.CLOUDSDK_CONFIG ?? (IS_WIN ? join(process.env.APPDATA ?? "", "gcloud") : join(HOME, ".config", "gcloud"));
+const gcloudSignedIn = () => existsSync(join(gcloudConfig(), "credentials.db")) || existsSync(join(gcloudConfig(), "access_tokens.db"));
+const awsSignedIn = () => !!process.env.AWS_ACCESS_KEY_ID || !!process.env.AWS_PROFILE || existsSync(join(HOME, ".aws", "credentials")) || existsSync(join(HOME, ".aws", "config"));
+
 async function gcloud(args: string[], timeoutMs = 60_000): Promise<any | null> {
-  const r = await run(gcloudBin(), [...args, "--format=json", "--quiet"], { timeoutMs });
+  const r = await run(gcloudBin(), [...args, "--format=json", "--quiet"], { timeoutMs, env: NO_METADATA });
   if (r.code !== 0) return null;
   try {
     return JSON.parse(r.stdout);
@@ -29,6 +37,7 @@ export async function scanCloud(ctx: ScanCtx) {
   const report = (f: F, t = "cloud") => ctx.report({ layer: "cloud", ...f }, t);
 
   await ctx.step("cloud", "gcp.account", "Google Cloud access", async () => {
+    if (!gcloudSignedIn()) return "Google Cloud CLI isn't signed in";
     const auth = await gcloud(["auth", "list"], 30_000);
     if (!auth) return "Google Cloud CLI isn't signed in";
     const active = auth.find((a: any) => a.status === "ACTIVE");
@@ -81,7 +90,8 @@ export async function scanCloud(ctx: ScanCtx) {
   });
 
   await ctx.step("cloud", "aws.account", "AWS access", async () => {
-    const r = await run(IS_WIN ? "aws.exe" : "aws", ["sts", "get-caller-identity", "--output", "json"], { timeoutMs: 30_000 });
+    if (!awsSignedIn()) return "AWS CLI isn't signed in";
+    const r = await run(IS_WIN ? "aws.exe" : "aws", ["sts", "get-caller-identity", "--output", "json"], { timeoutMs: 30_000, env: NO_METADATA });
     if (r.code !== 0) return "AWS CLI isn't signed in";
     const id = JSON.parse(r.stdout);
     ctx.target({ kind: "cloud", id: "aws", name: `AWS ${id.Account}`, layer: "cloud" });
