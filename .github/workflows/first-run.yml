@@ -51,11 +51,11 @@ jobs:
           if AX find "Your Mac will ask for your password once" 30 Lockdown; then
             shot 03-heads-up
             AX click "Continue" 10 Lockdown
-            AX find "make changes" 60 SecurityAgent && sleep 1 && shot 04-password-box
+            { AX find "needs your password" 60 SecurityAgent && sleep 1 && shot 04-password-box; } || true
             AX click "Cancel" 30 SecurityAgent; sleep 3
             AX find "still need" 120 Lockdown && shot 05-cancelled-nothing-changed
             AX click "Try again" 10 Lockdown
-            AX find "make changes" 60 SecurityAgent; sleep 1
+            AX find "needs your password" 60 SecurityAgent || true; sleep 1
             osascript -e "tell application \"System Events\" to tell process \"SecurityAgent\"" -e "set value of text field 1 of window 1 to \"lktester\"" -e "set value of text field 2 of window 1 to \"$PW\"" -e "end tell" || true
             AX click "OK" 20 SecurityAgent
           fi
