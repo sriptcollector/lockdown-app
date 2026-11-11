@@ -281,6 +281,7 @@ function Done({ s, onOpen, onScan, onFix, seeDetails, demo }: { s: State; onOpen
   const yours = left.filter((f) => actionOf(f));
   const other = left.length - yours.length;
   const safe = !left.length;
+  const optionalLeft = left.filter(isOptional);
   if (demo) {
     return (
       <section className="panel hero">
@@ -306,13 +307,15 @@ function Done({ s, onOpen, onScan, onFix, seeDetails, demo }: { s: State; onOpen
   return (
     <section className="panel hero">
       {safe && <SafeMark />}
-      <h1>{safe ? "You're safe" : yours.length ? "Almost safe" : "Much safer"}</h1>
+      <h1>{safe ? "You're safe" : !fixed && optionalLeft.length ? "Your check is done" : yours.length ? "Almost safe" : "Much safer"}</h1>
       <p className="lede">
-        Lockdown fixed {fixed} thing{fixed === 1 ? "" : "s"}.{" "}
+        {!fixed && optionalLeft.length
+          ? `What's left needs your password or changes your code, so Lockdown didn't do it on its own. Tick what you want below. `
+          : `Lockdown fixed ${fixed} thing${fixed === 1 ? "" : "s"}. `}
         {yours.length ? `${yours.length === 1 ? "One thing needs" : `${yours.length} things need`} a click from you${other ? ` (and ${other} smaller one${other === 1 ? " is" : "s are"} in the list)` : ""}:` : other ? `${other === 1 ? "One smaller thing is" : `${other} smaller things are`} in the list if you want to look.` : "We'll check again every week."}
       </p>
       {refused.length > 0 && <AdminRetry count={refused.length} onRetry={() => onFix(refused, refused)} />}
-      <Optional items={openFindings(s).filter((f) => f.severity !== "info" && isOptional(f))} onFix={onFix} />
+      <Optional items={optionalLeft} onFix={onFix} open={!fixed} />
       {yours.length > 0 && (
         <ul className="todo">
           {yours.map((f) => (
@@ -374,12 +377,12 @@ export function actionOf(f: Finding): string | null {
 }
 
 /** Fixes that never run by themselves. Nothing is ticked until the person ticks it. */
-function Optional({ items, onFix }: { items: Finding[]; onFix: (approve?: string[], only?: string[]) => void }) {
+function Optional({ items, onFix, open }: { items: Finding[]; onFix: (approve?: string[], only?: string[]) => void; open?: boolean }) {
   const [picked, setPicked] = useState<string[]>([]);
   if (!items.length) return null;
   const password = items.some((f) => picked.includes(f.id) && optionalWhy(f) === "password");
   return (
-    <details className="optional">
+    <details className="optional" open={open}>
       <summary>
         {items.length} optional fix{items.length === 1 ? "" : "es"} you can choose
       </summary>
