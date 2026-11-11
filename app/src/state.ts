@@ -1,5 +1,6 @@
 import type { BreakRisk, Change, Finding, Layer, Preferences, ScanSummary, Severity, Target } from "../../engine/src/types";
 export type { BreakRisk, Change, Finding, Layer, Preferences, ScanSummary, Severity, Target };
+import { OPTIONAL_SAYS, optionalWhy } from "../../engine/src/policy";
 
 export const LAYERS: { id: Layer; name: string; blurb: string }[] = [
   { id: "code", name: "Code", blurb: "Leaked keys, risky packages, injection, source maps" },
@@ -140,3 +141,6 @@ export function worst(findings: Finding[]): Severity | null {
 
 /** Fixes the user has to do (or that only open a settings page). */
 export const isManual = (f: Finding) => !f.fix || ["none", "win.open-settings", "mac.open"].includes(f.fix.fixer);
+/** Waits, unticked, on the optional list (needs a password, changes code or accounts, or affects other programs). */
+export const isOptional = (f: Finding) => !isManual(f) && optionalWhy(f) !== null;
+export { OPTIONAL_SAYS, optionalWhy };

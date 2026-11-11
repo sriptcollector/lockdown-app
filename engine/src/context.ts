@@ -6,6 +6,8 @@ export interface ScanCtx {
   prefs: Preferences;
   emit(e: ScanEvent): void;
   target(t: Target): void;
+  /** Everything found so far in this check. */
+  findings: Finding[];
   report(f: Omit<Finding, "id"> & { id?: string }, targetId?: string): void;
   /** Time a check and send start/done events around it. */
   step(layer: Layer, check: string, label: string, fn: () => Promise<void | string>, targetId?: string): Promise<void>;

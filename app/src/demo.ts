@@ -1,4 +1,5 @@
 // Sample scan for the demo and the product page. Every name here is made up.
+import { optionalWhy } from "../../engine/src/policy";
 import type { Ev, Finding } from "./state";
 
 type F = Omit<Finding, "id"> & { id: string };
@@ -79,7 +80,8 @@ export function demoFix(findings: Finding[], approve: string[], prefs: any, emit
     const risks = x.fix?.risks ?? [];
     const manual = !x.fix || x.fix.fixer === "none" || x.fix.fixer === "win.open-settings";
     const kept = risks.find((r) => keep.includes(r.reliance));
-    const decision = manual ? "manual" : kept ? "skip" : risks.some((r) => r.level === "likely") && !approve.includes(x.id) ? "skip" : "apply";
+    const optional = !manual && optionalWhy(x) !== null && !approve.includes(x.id);
+    const decision = manual ? "manual" : kept ? "skip" : optional ? "optional" : risks.some((r) => r.level === "likely") && !approve.includes(x.id) ? "skip" : "apply";
     return { id: x.id, decision, reason: kept ? `you rely on this: ${kept.says}` : risks[0]?.says ?? (manual ? x.fix?.manual ?? "" : "safe"), risks };
   });
   emit({ type: "fix-plan", items });

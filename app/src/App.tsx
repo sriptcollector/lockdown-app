@@ -21,13 +21,9 @@ export function App() {
   const [demoNote, setDemoNote] = useState<string | null>(null);
   const started = useRef(false);
 
-  // Before a check, macOS folder popups get their own guided step so none appear by surprise mid-scan.
-  const startScan = async () => {
-    if (!bridge) return;
-    const p = await bridge.permissions().catch(() => null);
-    if (p && p.folders.length && !p.answered) setAskFolders(true);
-    else bridge.scan(layersFor());
-  };
+  // A check never makes the computer ask anything: guarded Mac folders are skipped, and the results
+  // offer "Choose folders", which asks only when pressed.
+  const startScan = () => bridge?.scan(layersFor());
 
   useEffect(() => {
     if (started.current) return;
@@ -112,7 +108,7 @@ export function App() {
               paid={canFix}
               onFix={(approve, only, keep) => (canFix ? bridge?.fix(approve, only, keep) : setUnlock({ approve, only, keep }))}
               onUndo={(t) => bridge?.undo(t)}
-              onOpen={(t) => (bridge?.demo ? setDemoNote("In the app, this button opens the right page on your own computer.") : bridge?.openTarget(t))}
+              onOpen={(t) => (t === "lockdown:folders" ? setAskFolders(true) : bridge?.demo ? setDemoNote("In the app, this button opens the right page on your own computer.") : bridge?.openTarget(t))}
               getQuestions={async () => ((await bridge?.questions()) ?? []) as Question[]}
             />
           )}

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check } from "./Onboarding";
 import { AdminAsk, AdminRetry } from "./Permissions";
-import { type Finding, isManual, type Layer, LAYERS, openFindings, SEV_ORDER, SEV_WORD, type Severity, type State } from "./state";
+import { type Finding, isManual, isOptional, type Layer, LAYERS, OPTIONAL_SAYS, openFindings, optionalWhy, SEV_ORDER, SEV_WORD, type Severity, type State } from "./state";
 
 const fixedStates = new Set(["applied", "pr-opened"]);
 
@@ -17,8 +17,8 @@ export interface Question {
   touches?: string[];
 }
 
-const isMac = /Mac/i.test(navigator.userAgent);
-const PERMISSION = isMac ? "Your Mac may ask for your password once. That's Lockdown." : "Windows may ask “Allow this app to make changes?” once. Press Yes.";
+// "Fix everything" never needs admin, so nothing pops up. Optional fixes that do need it say so before they run.
+const PERMISSION = "No pop-ups, and you can undo anything.";
 
 export function Panel(props: {
   s: State;
@@ -169,7 +169,9 @@ function Scanning({ s, onStop, demo }: { s: State; onStop: () => void; demo: boo
 
 function Found({ s, onFix, onScan, seeDetails, demo, paid }: { s: State; onFix: () => void; onScan: () => void; seeDetails: () => void; demo: boolean; paid: boolean }) {
   const open = openFindings(s).filter((f) => f.severity !== "info");
-  const autoFix = open.filter((f) => !isManual(f));
+  const autoFix = open.filter((f) => !isManual(f) && !isOptional(f));
+  const optional = open.filter(isOptional);
+  const yours = open.length - autoFix.length - optional.length;
   const serious = open.filter((f) => f.severity === "critical" || f.severity === "high").length;
   if (!open.length) {
     return (
@@ -190,7 +192,15 @@ function Found({ s, onFix, onScan, seeDetails, demo, paid }: { s: State; onFix: 
       </h1>
       <p className="lede">
         {demo ? "Its" : "Your"} safety score is {scoreText(s)} out of 100. {serious ? `${serious} of them ${serious === 1 ? "is" : "are"} serious. ` : ""}
-        {autoFix.length === open.length ? "Lockdown can fix all of them for you." : autoFix.length ? `Lockdown fixes ${autoFix.length} by itself. The other ${open.length - autoFix.length} take one click from you, and we'll show you how.` : "Each one takes one click from you, and we'll show you how."}
+        {autoFix.length === open.length
+          ? "Lockdown can fix all of them for you."
+          : [
+              autoFix.length ? `Lockdown fixes ${autoFix.length} by itself, with no pop-ups.` : "",
+              optional.length ? `${optional.length} more are optional, because they need your password or change your code or accounts. You choose those after.` : "",
+              yours > 0 ? `${yours} take one click from you, and we'll show you how.` : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
       </p>
       <button className="btn primary huge" onClick={onFix} autoFocus>
         <Shield /> Fix everything
@@ -256,7 +266,7 @@ function Fixing({ s, demo }: { s: State; demo: boolean }) {
         <span style={{ transform: `scaleX(${Math.max(0.05, Math.min(1, done / total))})` }} />
       </div>
       <p className="lede">{s.adminAsking ? "Almost done. The last step needs your OK." : `${Math.min(done, total)} of ${total} done`}</p>
-      {demo ? <p className="fine">On a real computer, Lockdown asks Windows or your Mac for permission once before changing settings.</p> : s.adminAsking ? <AdminAsk /> : <p className="fine">{PERMISSION}</p>}
+      {demo ? <p className="fine">On a real computer it works the same way: no pop-ups, and every change can be undone.</p> : s.adminAsking ? <AdminAsk /> : <p className="fine">{PERMISSION}</p>}
     </section>
   );
 }
@@ -302,6 +312,7 @@ function Done({ s, onOpen, onScan, onFix, seeDetails, demo }: { s: State; onOpen
         {yours.length ? `${yours.length === 1 ? "One thing needs" : `${yours.length} things need`} a click from you${other ? ` (and ${other} smaller one${other === 1 ? " is" : "s are"} in the list)` : ""}:` : other ? `${other === 1 ? "One smaller thing is" : `${other} smaller things are`} in the list if you want to look.` : "We'll check again every week."}
       </p>
       {refused.length > 0 && <AdminRetry count={refused.length} onRetry={() => onFix(refused, refused)} />}
+      <Optional items={openFindings(s).filter((f) => f.severity !== "info" && isOptional(f))} onFix={onFix} />
       {yours.length > 0 && (
         <ul className="todo">
           {yours.map((f) => (
@@ -337,6 +348,7 @@ function buttonFor(target: string): string {
   if (/deviceencryption|FileVault/i.test(target)) return "Turn it on";
   if (/appsfeatures/i.test(target)) return "Open apps";
   if (/threatsettings/i.test(target)) return "Open settings";
+  if (target === "lockdown:folders") return "Choose folders";
   return "Show me how";
 }
 
@@ -359,6 +371,39 @@ function scoreText(s: State) {
 export function actionOf(f: Finding): string | null {
   const p = (f.fix?.params ?? {}) as { uri?: string; url?: string };
   return (f.fix && isManual(f) && (p.uri || p.url)) || null;
+}
+
+/** Fixes that never run by themselves. Nothing is ticked until the person ticks it. */
+function Optional({ items, onFix }: { items: Finding[]; onFix: (approve?: string[], only?: string[]) => void }) {
+  const [picked, setPicked] = useState<string[]>([]);
+  if (!items.length) return null;
+  const password = items.some((f) => picked.includes(f.id) && optionalWhy(f) === "password");
+  return (
+    <details className="optional">
+      <summary>
+        {items.length} optional fix{items.length === 1 ? "" : "es"} you can choose
+      </summary>
+      <ul>
+        {items.map((f) => (
+          <li key={f.id}>
+            <label>
+              <input type="checkbox" checked={picked.includes(f.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, f.id] : picked.filter((x) => x !== f.id))} />
+              <span>
+                {f.fix!.action}
+                <span className="optional-why">{OPTIONAL_SAYS[optionalWhy(f)!]} · {f.title}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="row-actions">
+        <button className="btn primary" disabled={!picked.length} onClick={() => onFix(picked, picked)}>
+          Fix the ones I ticked
+        </button>
+        {password && <span className="fine">Your computer will ask for your password once.</span>}
+      </div>
+    </details>
+  );
 }
 
 // ---------- details: the full list, undo, and the technical words ----------

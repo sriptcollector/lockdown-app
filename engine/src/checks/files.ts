@@ -144,8 +144,8 @@ export async function scanFiles(ctx: ScanCtx) {
         check: "files.not-checked",
         severity: "info",
         title: `Lockdown didn't look in ${names}`,
-        why: "Your Mac keeps apps out of these folders until you say yes, so passwords or keys left there weren't checked.",
-        fix: { fixer: "mac.open", action: "Let Lockdown check these folders", params: { url: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_FilesAndFolders" }, manual: `In System Settings > Privacy & Security > Files & Folders, turn on ${names} under Lockdown.` },
+        why: "Your Mac asks before any app looks in these folders, and Lockdown never makes it ask on its own. Passwords or keys left there weren't checked.",
+        fix: { fixer: "mac.open", action: "Choose folders to check", params: { url: "lockdown:folders" }, manual: `Press Choose folders. Your Mac asks once for each folder; click Allow for the ones you want checked.` },
       });
     }
     for (const d of [...new Set(dirs)]) {

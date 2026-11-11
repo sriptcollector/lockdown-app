@@ -488,17 +488,29 @@ export const FIXERS: Record<string, Fixer> = {
       const p = f.fix!.params as any;
       const repos: string[] = p.repos ?? [p.repo];
       const done: { repo: string; feat: string }[] = [];
+      let already = 0;
       for (const repo of repos) {
+        // Only what was off gets switched on and remembered, so undo never turns off something that was already on.
+        const sa = (await gh(`/repos/${repo}`)).data?.security_and_analysis ?? {};
         for (const feat of p.features as string[]) {
           if (feat === "vulnerability-alerts") {
+            if ((await gh(`/repos/${repo}/vulnerability-alerts`)).status === 204) {
+              already++;
+              continue;
+            }
             const r = await gh(`/repos/${repo}/vulnerability-alerts`, { method: "PUT" });
             if (r.status === 204) done.push({ repo, feat });
           } else {
+            if (sa[feat]?.status === "enabled") {
+              already++;
+              continue;
+            }
             const r = await gh(`/repos/${repo}`, { method: "PATCH", body: { security_and_analysis: { [feat]: { status: "enabled" } } } });
             if (r.status === 200) done.push({ repo, feat });
           }
         }
       }
+      if (!done.length && already) return { before: { enabled: [] }, result: "skipped", note: "already on" };
       if (!done.length) throw new Error("GitHub didn't accept the change");
       return { before: { enabled: done }, note: `${done.length} setting${done.length > 1 ? "s" : ""} turned on` };
     },

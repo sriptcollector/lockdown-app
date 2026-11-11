@@ -40,6 +40,9 @@ export function summarize(runId: string, r: Omit<ScanResult, "summary">): ScanSu
   };
 }
 
+/** The whole check stops here, so it's never a long wait. */
+const SCAN_LIMIT_MS = Number(process.env.LOCKDOWN_SCAN_LIMIT_MS) || 75_000;
+
 export async function runScan(prefs: Preferences, emit: (e: ScanEvent) => void, only?: Layer[]): Promise<ScanResult> {
   const runId = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   scanStop.reset();
@@ -52,6 +55,8 @@ export async function runScan(prefs: Preferences, emit: (e: ScanEvent) => void, 
   // Rough size of the job so the progress bar moves evenly: ~30 machine, file and account checks, plus 4 per project.
   emit({ type: "plan", total: 30 + (want("code") ? repos.length * 4 + 1 : 0) + (want("github") ? 3 : 0) });
 
+  // A check never runs past the time limit: whatever isn't done by then is noted and comes first next time.
+  const limit = setTimeout(() => scanStop.stop(false), SCAN_LIMIT_MS);
   // Machine, files, cloud and GitHub run side by side; code scanning is the long pole.
   await Promise.all([
     (async () => {
@@ -68,7 +73,13 @@ export async function runScan(prefs: Preferences, emit: (e: ScanEvent) => void, 
     want("code") ? scanRepos(ctx, repos) : null,
   ]);
 
-  const result: ScanResult = { summary: { ...summarize(runId, ctx), partial: scanStop.stopped || undefined }, findings: ctx.findings, targets: ctx.targets, checks: ctx.checks };
+  clearTimeout(limit);
+  const timedOut = scanStop.stopped && !scanStop.byPerson;
+  if (timedOut) {
+    const skipped = [...new Set(ctx.checks.filter((c) => c.status === "skipped" && c.note === "stopped early").map((c) => c.layer))];
+    ctx.report({ layer: skipped[0] ?? "code", check: "scan.time-limit", severity: "info", title: "Some checks didn't fit in this run", why: "Lockdown keeps each check under a minute and a half. Press Check again and it continues with what's left; unchanged projects are remembered.", evidence: skipped.length ? `not finished: ${skipped.join(", ")}` : undefined });
+  }
+  const result: ScanResult = { summary: { ...summarize(runId, ctx), partial: scanStop.byPerson || undefined }, findings: ctx.findings, targets: ctx.targets, checks: ctx.checks };
   scanStop.reset();
   const order: Severity[] = ["critical", "high", "medium", "low", "info"];
   result.findings.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));

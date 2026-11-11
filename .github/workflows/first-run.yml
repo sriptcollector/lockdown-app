@@ -31,53 +31,26 @@ jobs:
           # Last: take away password-free sudo, like a normal Mac account.
           sudo sh -c 'for f in $(grep -rlE "NOPASSWD" /etc/sudoers /etc/sudoers.d 2>/dev/null); do sed -i "" "s/NOPASSWD: *//" "$f"; done' 
           sudo -k; if sudo -n true 2>/dev/null; then echo "sudo is still password-free"; exit 1; fi
-      - name: First run, like a person
+      - name: First run, like a person (and watch for any system popup)
         run: |
           AX() { osascript -l JavaScript engine/test/first-run/ax.js "$@"; }
           shot() { screencapture -x "shots/$1.png"; echo "shot $1"; }
-          step() { echo "::group::$1"; }
           mkdir -p shots
-          screencapture -v -V 2400 -k shots/first-run-mac.mov & REC=$!
+          # Popup watch: any window from the system's permission or password prompts counts as a failure.
+          ( while true; do osascript -e 'tell application "System Events" to get name of every process whose (name is "SecurityAgent" or name is "UserNotificationCenter" or name is "CoreServicesUIAgent" or name is "universalAccessAuthWarn") and (count of windows) > 0' 2>/dev/null | grep -v '^$' >> popups.txt; sleep 2; done ) & WATCH=$!
+          screencapture -v -V 1200 -k shots/first-run-mac.mov & REC=$!
           APP=/Applications/Lockdown.app; [ -d "$APP" ] || APP="$HOME/Applications/Lockdown.app"
           open "$APP"; sleep 8; shot 00-opened
-          step "check"; AX click "Check my computer" 90 Lockdown; sleep 1
-          AX find "Your Mac will ask about your folders" 20 Lockdown && shot 01-folder-step
-          AX click "Continue" 10 Lockdown
-          # The real macOS popups, one per folder: Allow, then Don't Allow (Documents), then Allow.
-          n=0
-          while [ $n -lt 6 ]; do
-            if AX find "would like to access" 25 > /tmp/p.txt 2>&1; then
-              cat /tmp/p.txt; shot "02-popup-$n"
-              if [ $n -eq 1 ]; then AX click "Don’t Allow" 5 || AX click "Don't Allow" 5; else AX click "Allow" 5; fi
-              n=$((n+1)); sleep 2
-            else break; fi
-          done
-          echo "answered $n folder popups"
-          if AX find "can't look in" 15 Lockdown; then
-            shot 03-refused
-            AX click "Turn it on in Settings" 10 Lockdown; sleep 5; shot 04-settings-opened
-            AX click "Documents Folder" 30 "System Settings" || AX click "Documents" 10 "System Settings" || true
-            sleep 3; shot 05-switched-on
-            osascript -e 'tell application "Lockdown" to activate'
-          fi
-          AX find "Checking" 60 Lockdown && shot 06-scanning
-          AX find "Fix everything" 1200 Lockdown && shot 07-results
-          step "fix"; AX click "Fix everything" 10 Lockdown; sleep 2
-          for i in 1 2 3 4; do AX click "Next" 3 Lockdown || break; sleep 1; done
+          AX click "Check my computer" 90 Lockdown
+          AX find "Checking" 30 Lockdown && shot 01-checking
+          AX find "Fix everything" 300 Lockdown && shot 02-results
+          AX click "Fix everything" 10 Lockdown; sleep 2
+          for i in 1 2 3 4 5; do AX click "Next" 3 Lockdown || break; sleep 1; done
           AX click "Fix everything" 5 Lockdown || true
-          # The admin password box: Cancel first, then the retry, then the password.
-          if AX find "Your Mac is asking for your password" 300 Lockdown; then
-            sleep 2; shot 08-password-box
-            AX click "Cancel" 30 SecurityAgent; sleep 3
-            AX find "still need" 120 Lockdown && shot 09-refused-retry
-            AX click "Try again" 10 Lockdown
-            AX find "Your Mac is asking for your password" 120 Lockdown; sleep 2
-            osascript -e "tell application \"System Events\" to tell process \"SecurityAgent\"" -e "set value of text field 1 of window 1 to \"lktester\"" -e "set value of text field 2 of window 1 to \"$PW\"" -e "end tell" || true
-            AX click "OK" 20 SecurityAgent
-          fi
-          AX find "safe" 900 Lockdown || AX find "Much safer" 30 Lockdown; sleep 2; shot 10-done
-          kill -INT $REC; wait $REC || true
-          ls -la shots
+          AX find "safe" 300 Lockdown || AX find "Much safer" 30 Lockdown; sleep 2; shot 03-done
+          AX find "optional fix" 10 Lockdown && shot 04-optional-list || true
+          kill $WATCH; kill -INT $REC; wait $REC || true
+          if [ -s popups.txt ]; then echo "POPUPS SEEN:"; sort -u popups.txt; exit 1; else echo "NO POPUPS during the whole run"; fi
       - name: Attach video and screenshots
         if: always()
         env:
@@ -104,6 +77,7 @@ jobs:
           $acct = $env:LOCKDOWN_TEST_SIGNED_IN | ConvertFrom-Json
           Invoke-RestMethod -Method Post -Uri https://lockdown-staging.westwardconsulting.ai/api/test/reset -Headers @{ authorization = "Bearer $($acct.session)" } | Out-Null
           [Environment]::SetEnvironmentVariable('LOCKDOWN_API', 'https://lockdown-staging.westwardconsulting.ai', 'User')
+          # Default Windows: ask before apps make changes (a Yes/No would show if Lockdown ever asked for admin).
           # Windows' default: ask before letting apps make changes, on the normal desktop so it can be recorded.
           Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -Value 5
           Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name PromptOnSecureDesktop -Value 0
@@ -112,7 +86,7 @@ jobs:
           New-Item -ItemType Directory -Force "$HOME\Downloads" | Out-Null
           "name,url,username,password`nbank,https://bank.test,me,hunter2" | Set-Content "$HOME\Downloads\Chrome Passwords.csv"
           choco install ffmpeg -y --no-progress | Out-Null
-      - name: First run, like a person
+      - name: First run, like a person (and watch for any admin prompt)
         shell: powershell
         run: |
           $U = "engine\test\first-run\uia.ps1"
@@ -120,37 +94,25 @@ jobs:
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           New-Item -ItemType Directory -Force shots | Out-Null
           function Shot($n) { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height; [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bmp.Save("shots\$n.png"); "shot $n" }
+          # Admin-prompt watch: consent.exe is the Windows Yes/No box.
+          $watch = Start-Job { $seen = 0; while ($true) { if (Get-Process consent -ErrorAction SilentlyContinue) { $seen++ }; if ($seen) { Set-Content "$using:PWD\uac.txt" $seen }; Start-Sleep -Milliseconds 500 } }
           $rec = Start-Process ffmpeg -ArgumentList '-y','-f','gdigrab','-framerate','8','-i','desktop','-pix_fmt','yuv420p','shots\first-run-win.mkv' -PassThru -WindowStyle Hidden
-          # Started like a double-click: a normal, non-admin process (the runner itself is already admin).
           $act = New-ScheduledTaskAction -Execute (Join-Path $env:LOCALAPPDATA 'Lockdown\lockdown.exe')
           $who = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
           Register-ScheduledTask -TaskName LockdownFirstRun -Action $act -Principal $who -Force | Out-Null
           Start-ScheduledTask -TaskName LockdownFirstRun; Start-Sleep 12; Shot 00-opened
-          UI click "Check my computer" Lockdown 90 | Out-Host
-          if (UI find "Fix everything" Lockdown 1200) { Shot 01-results }
-          UI click "Fix everything" Lockdown 10 | Out-Host; Start-Sleep 2
-          foreach ($i in 1..4) { if (-not (UI click "Next" Lockdown 3)) { break }; Start-Sleep 1 }
-          UI click "Fix everything" Lockdown 5 | Out-Host
-          # Not paid yet: the app offers the trial right there, already signed in.
-          if (UI find "Fix everything with Pro" Lockdown 60) {
-            Start-Sleep 1; Shot 01b-plan
-            UI click "Start free week" Lockdown 10 | Out-Host
-            Start-Sleep 8; Shot 01c-checkout-opened
-          }
-          # The real Windows prompt: No first, then the retry, then Yes.
-          if (UI find "Windows is asking for your OK" Lockdown 300) {
-            Start-Sleep 3; Shot 02-admin-ask
-            UI click "No" "User Account Control" 60 | Out-Host; Start-Sleep 3
-            if (UI find "still need" Lockdown 120) { Shot 03-refused-retry }
-            UI click "Try again" Lockdown 10 | Out-Host
-            UI find "Windows is asking for your OK" Lockdown 120 | Out-Host; Start-Sleep 3; Shot 04-admin-ask-again
-            UI click "Yes" "User Account Control" 60 | Out-Host
-          }
-          if (-not (UI find "safe" Lockdown 900)) { UI find "Much safer" Lockdown 30 | Out-Null }
-          Start-Sleep 2; Shot 05-done
-          Stop-Process -Id $rec.Id; Start-Sleep 2
+          UI click "Check my computer" Lockdown 90 | Out-Null
+          if (UI find "Fix everything" Lockdown 300) { Shot 01-results }
+          UI click "Fix everything" Lockdown 10 | Out-Null; Start-Sleep 2
+          foreach ($i in 1..5) { if (-not (UI click "Next" Lockdown 3)) { break }; Start-Sleep 1 }
+          UI click "Fix everything" Lockdown 5 | Out-Null
+          if (UI find "Fix everything with Pro" Lockdown 30) { Shot 01b-plan; UI click "Start free week" Lockdown 10 | Out-Null; Start-Sleep 8; Shot 01c-checkout-opened }
+          if (-not (UI find "safe" Lockdown 300)) { UI find "Much safer" Lockdown 30 | Out-Null }
+          Start-Sleep 2; Shot 02-done
+          if (UI find "optional fix" Lockdown 10) { Shot 03-optional-list }
+          Stop-Process -Id $rec.Id; Stop-Job $watch; Start-Sleep 2
           cmd /c "ffmpeg -y -loglevel error -i shots\first-run-win.mkv -c copy shots\first-run-win.mp4 2>nul"; Remove-Item shots\first-run-win.mkv -ErrorAction SilentlyContinue
-          Get-ChildItem shots
+          if (Test-Path uac.txt) { "ADMIN PROMPT SEEN"; exit 1 } else { "NO ADMIN PROMPT during the whole run" }
       - name: Attach video and screenshots
         if: always()
         shell: bash

@@ -17,7 +17,7 @@ const gcloudConfig = () => process.env.CLOUDSDK_CONFIG ?? (IS_WIN ? join(process
 const gcloudSignedIn = () => existsSync(join(gcloudConfig(), "credentials.db")) || existsSync(join(gcloudConfig(), "access_tokens.db"));
 const awsSignedIn = () => !!process.env.AWS_ACCESS_KEY_ID || !!process.env.AWS_PROFILE || existsSync(join(HOME, ".aws", "credentials")) || existsSync(join(HOME, ".aws", "config"));
 
-async function gcloud(args: string[], timeoutMs = 60_000): Promise<any | null> {
+async function gcloud(args: string[], timeoutMs = 20_000): Promise<any | null> {
   const r = await run(gcloudBin(), [...args, "--format=json", "--quiet"], { timeoutMs, env: NO_METADATA });
   if (r.code !== 0) return null;
   try {
@@ -44,12 +44,15 @@ export async function scanCloud(ctx: ScanCtx) {
     if (!active) return "Google Cloud CLI isn't signed in";
     ctx.target({ kind: "cloud", id: "gcp", name: "Google Cloud", layer: "cloud" });
     const projects = ((await gcloud(["projects", "list", "--limit=8"], 60_000)) ?? []) as any[];
+    // Cloud lookups are slow (a few seconds per call): half a minute, then the rest wait for the next check.
+    const until = Date.now() + 30_000;
     await each(projects, 4, async (p) => {
+      if (Date.now() > until) return;
       const pid = p.projectId;
       const tid = `gcp:${pid}`;
       ctx.target({ kind: "cloud", id: tid, name: pid, layer: "cloud" });
       await ctx.step("cloud", "gcp.project", `${pid}: keys and buckets`, async () => {
-        const [sas, buckets] = await Promise.all([gcloud(["iam", "service-accounts", "list", `--project=${pid}`]), gcloud(["storage", "buckets", "list", `--project=${pid}`], 90_000)]);
+        const [sas, buckets] = await Promise.all([gcloud(["iam", "service-accounts", "list", `--project=${pid}`]), gcloud(["storage", "buckets", "list", `--project=${pid}`], 20_000)]);
         await each((sas ?? []) as any[], 6, async (sa) => {
           const keys = ((await gcloud(["iam", "service-accounts", "keys", "list", `--iam-account=${sa.email}`, "--managed-by=user", `--project=${pid}`])) ?? []) as any[];
           for (const k of keys.filter((k) => !k.disabled)) {

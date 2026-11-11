@@ -108,7 +108,7 @@ export function serve(port = 0, token = process.env.LOCKDOWN_TOKEN || randomByte
           const prefs = loadPrefs();
           const plan = await makePlan(scan, prefs, body.only);
           // Items the user approved in the app run even if the preferences would hold them.
-          for (const p of plan) if (body.approve?.includes(p.finding.id) && p.decision === "hold") p.decision = "apply";
+          for (const p of plan) if (body.approve?.includes(p.finding.id) && (p.decision === "hold" || p.decision === "optional")) p.decision = "apply";
           broadcast({ type: "fix-plan", items: plan.map((p) => ({ id: p.finding.id, decision: p.decision, reason: p.reason, risks: p.risks })) });
           const r = await applyPlan(plan, prefs, broadcast);
           broadcast({ type: "fix-finished", runId: r.runId, changes: r.changes });

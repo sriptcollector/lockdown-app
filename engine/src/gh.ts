@@ -1,6 +1,6 @@
 // Minimal GitHub REST client. Token comes from the app's GitHub connection
 // (LOCKDOWN_GITHUB_TOKEN) or the GitHub CLI if it's signed in. Never logged.
-import { run } from "./util";
+import { run, scanStop } from "./util";
 
 let tokenPromise: Promise<string | null> | null = null;
 
@@ -23,6 +23,8 @@ export interface GhResponse<T = any> {
 }
 
 export async function gh<T = any>(path: string, init: { method?: string; body?: unknown } = {}): Promise<GhResponse<T>> {
+  // A stopped check makes no new GitHub calls (fixes never run while a check is stopping).
+  if (scanStop.stopped && (init.method ?? "GET") === "GET") throw new Error("stopped early");
   const token = await githubToken();
   if (!token) throw new Error("GitHub isn't connected");
   const res = await fetch(path.startsWith("http") ? path : `https://api.github.com${path}`, {

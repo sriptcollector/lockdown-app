@@ -17,7 +17,7 @@ export interface RepoMeta {
   path: string;
   name: string;
   remote?: string;
-  gh?: { owner: string; repo: string; private: boolean; fork: boolean; stars: number; pages: boolean; defaultBranch: string } | null;
+  gh?: { owner: string; repo: string; private: boolean; fork: boolean; stars: number; pages: boolean; defaultBranch: string; canPush: boolean } | null;
 }
 
 async function pool<T>(items: T[], n: number, fn: (x: T, i: number) => Promise<void>) {
@@ -35,7 +35,7 @@ export async function discoverRepos(ctx: ScanCtx): Promise<RepoMeta[]> {
     let gh: RepoMeta["gh"] = null;
     if (gr) {
       const info = await repoInfo(gr.owner, gr.repo);
-      if (info) gh = { owner: info.owner.login, repo: info.name, private: info.private, fork: info.fork, stars: info.stargazers_count, pages: info.has_pages, defaultBranch: info.default_branch };
+      if (info) gh = { owner: info.owner.login, repo: info.name, private: info.private, fork: info.fork, stars: info.stargazers_count, pages: info.has_pages, defaultBranch: info.default_branch, canPush: !!info.permissions?.push };
     }
     metas.push({ path: p, name: gh ? `${gh.owner}/${gh.repo}` : basename(p), remote, gh });
   });
@@ -66,13 +66,23 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
   const deadline = Date.now() + CODE_BUDGET_MS;
   const late = new Map<string, string>();
   const lateKinds = new Set<string>();
-  const inTime = (r: RepoMeta, kind: string, fn: () => Promise<void | string>) => () => {
+  const inTime = (r: RepoMeta, kind: string, fn: () => Promise<void | string>) => async () => {
+    // Unchanged since the last check? Reuse what it found, instantly.
+    const key = await cacheKey(r, kind);
+    const hit = key ? readCache(key) : null;
+    if (hit) {
+      for (const f of hit) ctx.report(f, `repo:${r.path}`);
+      return;
+    }
     if (Date.now() > deadline) {
       late.set(r.path, r.name);
       lateKinds.add(kind);
-      return Promise.resolve("time limit for this check");
+      return "time limit for this check";
     }
-    return fn();
+    const before = new Set(ctx.findings.map((f) => f.id));
+    const res = await fn();
+    if (key && res === undefined) writeCache(key, ctx.findings.filter((f) => !before.has(f.id) && f.layer === "code" && String(f.where ?? "").startsWith(r.name + "/")));
+    return res;
   };
   const n = repos.length;
   const label = (what: string, r: RepoMeta, i: number) => `${what} in ${r.name} (project ${i + 1} of ${n})`;
@@ -110,6 +120,30 @@ export async function scanRepos(ctx: ScanCtx, all: RepoMeta[]) {
   }
 }
 
+// ---- per-project cache: same commit and same working files → same results ----
+const CACHE_VERSION = "2";
+async function cacheKey(r: RepoMeta, kind: string): Promise<string | null> {
+  const head = (await run("git", ["-C", r.path, "rev-parse", "HEAD"], { timeoutMs: 10_000 })).stdout.trim();
+  if (!head) return null;
+  let idx = 0;
+  try {
+    idx = statSync(join(r.path, ".git", "index")).mtimeMs;
+  } catch {}
+  return hash(CACHE_VERSION, kind, r.path, head, String(idx), rulesYml);
+}
+function readCache(key: string): any[] | null {
+  try {
+    return JSON.parse(readFileSync(join(dataDir("cache"), `${key}.json`), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function writeCache(key: string, findings: any[]) {
+  try {
+    writeFileSync(join(dataDir("cache"), `${key}.json`), JSON.stringify(findings.map(({ id, ...f }) => ({ ...f, id }))));
+  } catch {}
+}
+
 /** Days since anyone worked in this project (git updates its index on every checkout, add and commit). */
 function idleDays(r: RepoMeta): number {
   for (const f of ["index", "HEAD"]) {
@@ -121,10 +155,18 @@ function idleDays(r: RepoMeta): number {
 }
 
 /** Deep code checks (leaked keys, unsafe code) get this long in one scan. */
-const CODE_BUDGET_MS = Number(process.env.LOCKDOWN_CODE_BUDGET_MS) || 3 * 60_000;
+const CODE_BUDGET_MS = Number(process.env.LOCKDOWN_CODE_BUDGET_MS) || 60_000;
 const LOCKFILES = new Set(["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "requirements.txt", "poetry.lock", "Pipfile.lock", "uv.lock", "Cargo.lock", "go.sum", "Gemfile.lock", "composer.lock", "pubspec.lock", "mix.lock"]);
 
-const report = (ctx: ScanCtx, r: RepoMeta, f: F) => ctx.report({ layer: "code", ...f }, `repo:${r.path}`);
+// Fixes that work by opening a pull request only make sense where the person can push. For someone else's
+// project, a clone with no GitHub copy, or a repo that's gone, say plainly what to change instead.
+const BRANCH_FIXERS = new Set(["git.untrack", "git.gitignore", "deps.npm", "code.patch", "code.config-edit", "gha.pin"]);
+function pushable(r: RepoMeta, f: F): F {
+  if (!f.fix || !(f.fix.pr || BRANCH_FIXERS.has(f.fix.fixer)) || r.gh?.canPush) return f;
+  const why = !r.remote ? "This project isn't on GitHub, so Lockdown can't open a pull request for it." : !r.gh ? "Its GitHub repo can't be reached (deleted, renamed or private to someone else)." : "It's someone else's project, so you can't push changes to it.";
+  return { ...f, fix: { fixer: "none", action: f.fix.action, params: {}, manual: `${why} ${f.fix.manual ?? `Make this change yourself: ${f.fix.action.toLowerCase()}.`}` } };
+}
+const report = (ctx: ScanCtx, r: RepoMeta, f: F) => ctx.report({ layer: "code", ...pushable(r, f) }, `repo:${r.path}`);
 
 async function gitleaksRepo(ctx: ScanCtx, r: RepoMeta): Promise<void | string> {
   const bin = await ensureTool("gitleaks");
@@ -287,7 +329,7 @@ async function osvAll(ctx: ScanCtx, repos: RepoMeta[]): Promise<void | string> {
 }
 
 async function opengrepRepo(ctx: ScanCtx, repo: RepoMeta): Promise<void | string> {
-  return opengrepAll(ctx, [repo], 120_000);
+  return opengrepAll(ctx, [repo], 45_000);
 }
 
 async function opengrepAll(ctx: ScanCtx, repos: RepoMeta[], timeoutMs = 900_000): Promise<void | string> {

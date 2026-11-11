@@ -41,16 +41,23 @@ function winPsModulePath(): string {
 // "Stop and show what's found so far": every tool a scan starts is tracked so stopping ends them at once.
 const live = new Set<import("node:child_process").ChildProcess>();
 let stopping = false;
+let byPerson = false;
 export const scanStop = {
   get stopped() {
     return stopping;
   },
-  stop() {
+  /** True only when the person pressed Stop (not when the time limit ended the check). */
+  get byPerson() {
+    return byPerson;
+  },
+  stop(person = true) {
     stopping = true;
+    byPerson = byPerson || person;
     for (const c of live) killTree(c);
   },
   reset() {
     stopping = false;
+    byPerson = false;
   },
 };
 
@@ -65,6 +72,8 @@ export function run(
   args: string[],
   opts: { cwd?: string; timeoutMs?: number; input?: string; env?: Record<string, string> } = {},
 ): Promise<RunResult> {
+  // Once a check is stopped (by the person or the time limit), no new tools start.
+  if (stopping) return Promise.resolve({ code: -1, stdout: "", stderr: "stopped", timedOut: false });
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";

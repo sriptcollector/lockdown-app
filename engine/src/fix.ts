@@ -4,12 +4,13 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AdminBatch, FIXERS, type FixCtx } from "./fixers";
 import { canFix } from "./license";
+import { OPTIONAL_SAYS, optionalWhy } from "./policy";
 import { loadPrefs } from "./prefs";
 import { detectRisks } from "./risk";
 import type { BreakRisk, Change, Finding, Preferences, ScanResult } from "./types";
 import { dataDir } from "./util";
 
-export type Decision = "apply" | "hold" | "skip" | "manual";
+export type Decision = "apply" | "hold" | "skip" | "manual" | "optional";
 
 export interface PlanItem {
   finding: Finding;
@@ -22,6 +23,9 @@ export function decide(f: Finding, risks: BreakRisk[], prefs: Preferences): { de
   if (!f.fix || ["none", "win.open-settings", "mac.open"].includes(f.fix.fixer) || !FIXERS[f.fix.fixer]) return { decision: "manual", reason: f.fix?.manual ?? "needs you" };
   const kept = risks.find((r) => prefs.keep.includes(r.reliance));
   if (kept) return { decision: "skip", reason: `you rely on this: ${kept.says}` };
+  // Admin, code and other people's software never run by themselves: they wait, unticked, on the optional list.
+  const why = optionalWhy(f);
+  if (why && prefs.mode !== "all-auto") return { decision: "optional", reason: OPTIONAL_SAYS[why] };
   if (prefs.mode === "review") return { decision: "hold", reason: "you review every fix" };
   if (prefs.mode === "all-auto") return { decision: "apply", reason: risks.length ? "you chose to fix everything" : "safe" };
   // safe-auto: everything can be undone, so only a fix that will likely break something waits

@@ -59,7 +59,8 @@ $f.autorun = Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explo
 $f.showExt = Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'HideFileExt'
 
 # --- Network ---
-$procById = @{}; Get-Process | ForEach-Object { $procById[$_.Id] = $_ }
+# One CIM query for names and paths (reading .Path off Get-Process opens every process and takes ~35 s).
+$procById = @{}; Get-CimInstance Win32_Process -Property ProcessId, Name, ExecutablePath | ForEach-Object { $procById[[int]$_.ProcessId] = [pscustomobject]@{ ProcessName = ($_.Name -replace '\.exe$', ''); Path = $_.ExecutablePath } }
 # netstat is far faster than Get-NetTCPConnection
 $ns = netstat -ano -p TCP; $ns6 = netstat -ano -p TCPv6
 $f.listening = @(); $f.established = @()
