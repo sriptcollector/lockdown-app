@@ -29,7 +29,7 @@ jobs:
           mkdir -p ~/Downloads && printf 'name,url,username,password\nbank,https://bank.test,me,hunter2\n' > ~/Downloads/passwords.csv
           sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
           # Last: take away password-free sudo, like a normal Mac account.
-          for f in $(sudo grep -rlE "NOPASSWD" /etc/sudoers /etc/sudoers.d 2>/dev/null); do sudo sed -i '' 's/NOPASSWD: *//' "$f"; done
+          sudo sh -c 'for f in $(grep -rlE "NOPASSWD" /etc/sudoers /etc/sudoers.d 2>/dev/null); do sed -i "" "s/NOPASSWD: *//" "$f"; done' 
           sudo -k; if sudo -n true 2>/dev/null; then echo "sudo is still password-free"; exit 1; fi
       - name: First run, like a person
         run: |
