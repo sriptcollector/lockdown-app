@@ -9,7 +9,7 @@ import { ghCaching } from "./gh";
 import { loadPrefs } from "./prefs";
 import { detectRisks } from "./risk";
 import type { BreakRisk, Change, Finding, Preferences, ScanResult } from "./types";
-import { dataDir } from "./util";
+import { dataDir, IS_MAC } from "./util";
 
 export type Decision = "apply" | "hold" | "skip" | "manual" | "optional";
 
@@ -106,6 +106,20 @@ export async function applyPlan(plan: PlanItem[], prefs: Preferences, emit: (e: 
       ch.note = res?.out.trim().slice(0, 300) || "not run";
     }
     emit({ type: "fix-done", change: ch });
+  }
+  // Mac: closing the one password box means "not now", so this run leaves everything as it was
+  // (Orion, 2026-11-11). Changes already made in this run are undone and wait for "Try again".
+  const cancelled = queued.some((id) => /prompt was cancel/i.test(ctx.admin.results.get(id)?.out ?? ""));
+  if (IS_MAC && cancelled) {
+    for (const ch of changes.filter((c) => c.result === "applied" && !queued.includes(c.findingId)).reverse()) {
+      const item = plan.find((p) => p.finding.id === ch.findingId);
+      try {
+        if (item) await FIXERS[ch.fixer].undo(ch.before, item.finding, ctx);
+        ch.result = "failed";
+        ch.note = "admin prompt was cancelled";
+        emit({ type: "fix-done", change: ch });
+      } catch {}
+    }
   }
   saveJournal(runId, changes);
   return { runId, changes };

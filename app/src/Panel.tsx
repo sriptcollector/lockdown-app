@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check } from "./Onboarding";
 import { AdminAsk, AdminRetry } from "./Permissions";
-import { type Finding, isManual, isOptional, type Layer, LAYERS, OPTIONAL_SAYS, openFindings, optionalWhy, SEV_ORDER, SEV_WORD, type Severity, type State } from "./state";
+import { type Finding, isManual, isOptional, type Layer, LAYERS, needsPassword, OPTIONAL_SAYS, openFindings, optionalWhy, PLATFORM, SEV_ORDER, SEV_WORD, type Severity, type State } from "./state";
 
 const fixedStates = new Set(["applied", "pr-opened"]);
 
@@ -41,6 +41,7 @@ export function Panel(props: {
   const [questions, setQuestions] = useState<Question[] | null>(null);
   // Answers survive Back, so stepping out of the questions and in again keeps what you picked.
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [heads, setHeads] = useState<null | { approve?: string[]; keep?: string[] }>(null);
   useEffect(() => {
     if (s.phase === "scanning") setDetails(false);
   }, [s.phase]);
@@ -48,6 +49,41 @@ export function Panel(props: {
   if (details) return <Details {...props} back={() => setDetails(false)} />;
   if (s.phase === "idle") return <Idle onScan={props.onScan} demo={props.demo} accounts={props.accounts} setAccounts={props.setAccounts} />;
   if (s.phase === "scanning") return <Scanning s={s} onStop={props.onStop} demo={props.demo} />;
+  // Mac: one plain heads-up before the single password prompt (Orion, 2026-11-11). Windows never prompts.
+  const pw = openFindings(s).filter((f) => f.severity !== "info" && needsPassword(f));
+  const fix = (approve?: string[], keep?: string[]) => {
+    if (pw.length && !props.demo) setHeads({ approve, keep });
+    else props.onFix(approve, undefined, keep);
+  };
+  if (heads) {
+    return (
+      <section className="panel hero" aria-labelledby="hu">
+        <button className="textlink back" onClick={() => setHeads(null)}>
+          ← Back
+        </button>
+        <h1 id="hu">Your Mac will ask for your password once</h1>
+        <p className="lede">That turns these on. It's the password you use to unlock this Mac, and it goes only to your Mac.</p>
+        <ul className="todo">
+          {pw.slice(0, 5).map((f) => (
+            <li key={f.id}>{f.fix!.action}</li>
+          ))}
+          {pw.length > 5 && <li>and {pw.length - 5} more</li>}
+        </ul>
+        <button
+          className="btn primary huge"
+          autoFocus
+          onClick={() => {
+            const h = heads;
+            setHeads(null);
+            props.onFix(h.approve, undefined, h.keep);
+          }}
+        >
+          Continue
+        </button>
+        <p className="fine">If you close the password box, nothing changes.</p>
+      </section>
+    );
+  }
   if (questions) {
     return (
       <Questions
@@ -57,7 +93,7 @@ export function Panel(props: {
         onBack={() => setQuestions(null)}
         onDone={(approve, keep) => {
           setQuestions(null);
-          props.onFix(approve, undefined, keep);
+          fix(approve, keep);
         }}
       />
     );
@@ -73,7 +109,7 @@ export function Panel(props: {
       onFix={async () => {
         const q = await props.getQuestions().catch(() => []);
         if (q.length) setQuestions(q);
-        else props.onFix();
+        else fix();
       }}
       seeDetails={() => setDetails(true)}
     />
@@ -380,7 +416,7 @@ export function actionOf(f: Finding): string | null {
 function Optional({ items, onFix, open }: { items: Finding[]; onFix: (approve?: string[], only?: string[]) => void; open?: boolean }) {
   const [picked, setPicked] = useState<string[]>([]);
   if (!items.length) return null;
-  const password = items.some((f) => picked.includes(f.id) && optionalWhy(f) === "password");
+  const password = items.some((f) => picked.includes(f.id) && optionalWhy(f, PLATFORM) === "password");
   return (
     <details className="optional" open={open}>
       <summary>
@@ -393,7 +429,7 @@ function Optional({ items, onFix, open }: { items: Finding[]; onFix: (approve?: 
               <input type="checkbox" checked={picked.includes(f.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, f.id] : picked.filter((x) => x !== f.id))} />
               <span>
                 {f.fix!.action}
-                <span className="optional-why">{OPTIONAL_SAYS[optionalWhy(f)!]} · {f.title}</span>
+                <span className="optional-why">{OPTIONAL_SAYS[optionalWhy(f, PLATFORM)!]} · {f.title}</span>
               </span>
             </label>
           </li>

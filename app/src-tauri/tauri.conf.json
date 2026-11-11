@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Lockdown",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "identifier": "ai.westwardconsulting.lockdown",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -22,7 +22,7 @@
     "targets": ["nsis", "app", "dmg"],
     "externalBin": ["binaries/lockdown-engine"],
     "publisher": "Westward",
-    "homepage": "https://westwardconsulting.ai/products/lockdown",
+    "homepage": "https://lockdown.westwardconsulting.ai",
     "category": "Utility",
     "shortDescription": "Find every way in, then fix it",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],

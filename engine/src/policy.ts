@@ -6,15 +6,19 @@
 // software goes on an optional list that is off until the person ticks it.
 import type { Finding } from "./types";
 
-const TOUCHES_OTHERS = /^(gh\.|deps\.|code\.|gcp\.|aws\.|win\.fw-block$|win\.startup-disable$|win\.service$|mac\.admin$)/;
+const TOUCHES_OTHERS = /^(gh\.|deps\.|code\.|gcp\.|aws\.|win\.fw-block$|win\.startup-disable$|win\.service$)/;
 
 export type OptionalWhy = "password" | "code" | "other-software";
 
-/** Why a fix waits on the optional list, or null when "Fix everything" can do it by itself. */
-export function optionalWhy(f: Finding): OptionalWhy | null {
+/**
+ * Why a fix waits on the optional list, or null when "Fix everything" does it.
+ * Orion (2026-11-11): on a Mac, admin fixes run in one batch behind a single password prompt that comes
+ * after a plain heads-up, because nearly every Mac security setting needs it. Windows never prompts.
+ */
+export function optionalWhy(f: Finding, platform: string = (globalThis as { process?: { platform?: string } }).process?.platform ?? ""): OptionalWhy | null {
   const fx = f.fix;
   if (!fx) return null;
-  if (fx.admin) return "password";
+  if (fx.admin) return platform === "darwin" && !TOUCHES_OTHERS.test(fx.fixer) ? null : "password";
   if (fx.pr || /^(gh\.|deps\.|code\.|gcp\.|aws\.)/.test(fx.fixer)) return "code";
   if (TOUCHES_OTHERS.test(fx.fixer)) return "other-software";
   return null;

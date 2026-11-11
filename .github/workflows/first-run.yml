@@ -47,11 +47,25 @@ jobs:
           AX click "Fix everything" 10 Lockdown; sleep 2
           for i in 1 2 3 4 5; do AX click "Next" 3 Lockdown || break; sleep 1; done
           AX click "Fix everything" 5 Lockdown || true
-          AX find "safe" 300 Lockdown || AX find "Much safer" 30 Lockdown; sleep 2; shot 03-done
-          AX find "optional fix" 10 Lockdown && shot 04-optional-list || true
+          # One heads-up, then exactly one password box (Orion, 2026-11-11). Cancel first: nothing may change.
+          if AX find "Your Mac will ask for your password once" 30 Lockdown; then
+            shot 03-heads-up
+            AX click "Continue" 10 Lockdown
+            AX find "make changes" 60 SecurityAgent && sleep 1 && shot 04-password-box
+            AX click "Cancel" 30 SecurityAgent; sleep 3
+            AX find "still need" 120 Lockdown && shot 05-cancelled-nothing-changed
+            AX click "Try again" 10 Lockdown
+            AX find "make changes" 60 SecurityAgent; sleep 1
+            osascript -e "tell application \"System Events\" to tell process \"SecurityAgent\"" -e "set value of text field 1 of window 1 to \"lktester\"" -e "set value of text field 2 of window 1 to \"$PW\"" -e "end tell" || true
+            AX click "OK" 20 SecurityAgent
+          fi
+          AX find "safe" 300 Lockdown || AX find "Much safer" 30 Lockdown; sleep 2; shot 06-done
           kill $WATCH || true; kill -INT $REC || true; wait $REC || true
           echo "popup watcher checked every 2 s for the whole run" 
-          if [ -s popups.txt ]; then echo "POPUPS SEEN:"; sort -u popups.txt; exit 1; else echo "NO POPUPS during the whole run"; fi
+          # The one allowed prompt is the password box (SecurityAgent). Anything else fails the run.
+          OTHER=$(grep -v "^SecurityAgent$" popups.txt | tr ',' '
+' | sed 's/^ *//' | grep -v "^SecurityAgent$" | grep -v '^$' | sort -u || true)
+          if [ -n "$OTHER" ]; then echo "OTHER POPUPS SEEN: $OTHER"; exit 1; else echo "ONLY THE PASSWORD BOX appeared during the whole run"; fi
       - name: Attach video and screenshots
         if: always()
         env:

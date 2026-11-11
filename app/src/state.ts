@@ -142,5 +142,8 @@ export function worst(findings: Finding[]): Severity | null {
 /** Fixes the user has to do (or that only open a settings page). */
 export const isManual = (f: Finding) => !f.fix || ["none", "win.open-settings", "mac.open"].includes(f.fix.fixer);
 /** Waits, unticked, on the optional list (needs a password, changes code or accounts, or affects other programs). */
-export const isOptional = (f: Finding) => !isManual(f) && optionalWhy(f) !== null;
+export const PLATFORM = /Mac/i.test(typeof navigator !== "undefined" ? navigator.userAgent : "") ? "darwin" : "win32";
+export const isOptional = (f: Finding) => !isManual(f) && optionalWhy(f, PLATFORM) !== null;
+/** Mac only: fixes that "Fix everything" runs behind its one password prompt. */
+export const needsPassword = (f: Finding) => PLATFORM === "darwin" && !isManual(f) && !!f.fix?.admin && optionalWhy(f, PLATFORM) === null;
 export { OPTIONAL_SAYS, optionalWhy };

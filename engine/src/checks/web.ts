@@ -7,7 +7,7 @@ import { findSecrets } from "../secrets";
 import { redact } from "../util";
 
 type F = Omit<Finding, "id" | "layer">;
-const UA = "Mozilla/5.0 (Lockdown security check; +https://westwardconsulting.ai/products/lockdown)";
+const UA = "Mozilla/5.0 (Lockdown security check; +https://lockdown.westwardconsulting.ai/about)";
 
 async function get(url: string, headers: Record<string, string> = {}, max = 3_000_000) {
   try {
