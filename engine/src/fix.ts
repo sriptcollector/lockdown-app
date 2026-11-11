@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AdminBatch, FIXERS, type FixCtx } from "./fixers";
 import { canFix } from "./license";
 import { OPTIONAL_SAYS, optionalWhy } from "./policy";
+import { ghCaching } from "./gh";
 import { loadPrefs } from "./prefs";
 import { detectRisks } from "./risk";
 import type { BreakRisk, Change, Finding, Preferences, ScanResult } from "./types";
@@ -71,6 +72,7 @@ export type FixEvent =
 /** Apply every "apply" item. Admin steps are gathered and run behind one prompt. */
 export async function applyPlan(plan: PlanItem[], prefs: Preferences, emit: (e: FixEvent) => void = () => {}): Promise<{ runId: string; changes: Change[] }> {
   if (!canFix()) throw new Error("Fixing needs Lockdown Pro. Sign in to unlock it.");
+  ghCaching.on = false; // fixes always read GitHub fresh
   const runId = `fix-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
   const ctx: FixCtx = { runId, backupDir: dataDir("backups", runId), prefs, admin: new AdminBatch() };
   const changes: Change[] = [];

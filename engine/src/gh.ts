@@ -1,6 +1,8 @@
 // Minimal GitHub REST client. Token comes from the app's GitHub connection
 // (LOCKDOWN_GITHUB_TOKEN) or the GitHub CLI if it's signed in. Never logged.
-import { run, scanStop } from "./util";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { dataDir, run, scanStop } from "./util";
 
 let tokenPromise: Promise<string | null> | null = null;
 
@@ -22,9 +24,43 @@ export interface GhResponse<T = any> {
   scopes: string[];
 }
 
+// Repo settings barely change, and GitHub allows 5,000 calls an hour: during a check, a settings read is
+// reused for 12 hours. Any change Lockdown makes to a repo clears that repo's saved reads, so the next
+// check sees it right away. Fixes always read fresh.
+const GH_CACHE_MS = 12 * 3600_000;
+let ghCache: Record<string, { at: number; status: number; data: any }> | null = null;
+export const ghCaching = { on: false };
+const cacheFile = () => join(dataDir("cache"), "github.json");
+function cacheMap() {
+  if (!ghCache) {
+    try {
+      ghCache = JSON.parse(readFileSync(cacheFile(), "utf8"));
+    } catch {
+      ghCache = {};
+    }
+  }
+  return ghCache!;
+}
+export function saveGhCache() {
+  try {
+    if (ghCache) writeFileSync(cacheFile(), JSON.stringify(ghCache));
+  } catch {}
+}
+const repoOf = (path: string) => path.match(/^\/repos\/[^/]+\/[^/?]+/)?.[0]?.toLowerCase();
+
 export async function gh<T = any>(path: string, init: { method?: string; body?: unknown } = {}): Promise<GhResponse<T>> {
+  const method = init.method ?? "GET";
   // A stopped check makes no new GitHub calls (fixes never run while a check is stopping).
-  if (scanStop.stopped && (init.method ?? "GET") === "GET") throw new Error("stopped early");
+  if (scanStop.stopped && method === "GET") throw new Error("stopped early");
+  const key = path.toLowerCase();
+  if (method === "GET" && ghCaching.on && key.startsWith("/repos/")) {
+    const hit = cacheMap()[key];
+    if (hit && Date.now() - hit.at < GH_CACHE_MS) return { status: hit.status, data: hit.data, scopes: [] };
+  } else if (method !== "GET") {
+    const r = repoOf(path);
+    if (r) for (const k of Object.keys(cacheMap())) if (k.startsWith(r)) delete ghCache![k];
+    saveGhCache();
+  }
   const token = await githubToken();
   if (!token) throw new Error("GitHub isn't connected");
   const res = await fetch(path.startsWith("http") ? path : `https://api.github.com${path}`, {
@@ -45,6 +81,7 @@ export async function gh<T = any>(path: string, init: { method?: string; body?: 
   } catch {
     data = text;
   }
+  if (method === "GET" && ghCaching.on && key.startsWith("/repos/") && res.status < 500 && res.status !== 403 && res.status !== 429) cacheMap()[key] = { at: Date.now(), status: res.status, data };
   return { status: res.status, data, scopes: (res.headers.get("x-oauth-scopes") ?? "").split(",").map((s) => s.trim()).filter(Boolean) };
 }
 

@@ -13,6 +13,7 @@ import { makeCtx } from "./context";
 import type { Layer, Preferences, ScanEvent, ScanResult, ScanSummary, Severity } from "./types";
 import { LAYERS } from "./types";
 import { dataDir, IS_MAC, IS_WIN, scanStop } from "./util";
+import { ghCaching, saveGhCache } from "./gh";
 
 // Points off per severity, growing with the square root of the count so 50 low findings don't
 // outweigh one critical. Score starts at 100, floors at 0.
@@ -57,6 +58,7 @@ export async function runScan(prefs: Preferences, emit: (e: ScanEvent) => void, 
 
   // A check never runs past the time limit: whatever isn't done by then is noted and comes first next time.
   const limit = setTimeout(() => scanStop.stop(false), SCAN_LIMIT_MS);
+  ghCaching.on = true;
   // Machine, files, cloud and GitHub run side by side; code scanning is the long pole.
   await Promise.all([
     (async () => {
@@ -74,6 +76,8 @@ export async function runScan(prefs: Preferences, emit: (e: ScanEvent) => void, 
   ]);
 
   clearTimeout(limit);
+  ghCaching.on = false;
+  saveGhCache();
   const timedOut = scanStop.stopped && !scanStop.byPerson;
   if (timedOut) {
     const skipped = [...new Set(ctx.checks.filter((c) => c.status === "skipped" && c.note === "stopped early").map((c) => c.layer))];
