@@ -22,8 +22,9 @@ jobs:
       - name: Default state (no permissions, admin needs a password)
         run: |
           tccutil reset All ai.westwardconsulting.lockdown || true
+          # A second admin account with a known password: the password box takes any admin's name and password.
           PW="Lk$(openssl rand -hex 8)"; echo "::add-mask::$PW"; echo "PW=$PW" >> "$GITHUB_ENV"
-          sudo dscl . -passwd /Users/runner "$PW"
+          sudo sysadminctl -addUser lktester -fullName "Lockdown Tester" -password "$PW" -admin
           D="$HOME/Library/Application Support/Lockdown"; mkdir -p "$D"; printf '%s' "$LOCKDOWN_TEST_ACCOUNT" > "$D/account.json"; chmod 600 "$D/account.json"
           mkdir -p ~/Downloads && printf 'name,url,username,password\nbank,https://bank.test,me,hunter2\n' > ~/Downloads/passwords.csv
           sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
@@ -71,7 +72,7 @@ jobs:
             AX find "still need" 120 Lockdown && shot 09-refused-retry
             AX click "Try again" 10 Lockdown
             AX find "Your Mac is asking for your password" 120 Lockdown; sleep 2
-            osascript -e "tell application \"System Events\" to keystroke \"$PW\""
+            osascript -e "tell application \"System Events\" to tell process \"SecurityAgent\"" -e "set value of text field 1 of window 1 to \"lktester\"" -e "set value of text field 2 of window 1 to \"$PW\"" -e "end tell" || true
             AX click "OK" 20 SecurityAgent
           fi
           AX find "safe" 900 Lockdown || AX find "Much safer" 30 Lockdown; sleep 2; shot 10-done
@@ -148,7 +149,7 @@ jobs:
           if (-not (UI find "safe" Lockdown 900)) { UI find "Much safer" Lockdown 30 | Out-Null }
           Start-Sleep 2; Shot 05-done
           Stop-Process -Id $rec.Id; Start-Sleep 2
-          ffmpeg -y -i shots\first-run-win.mkv -c copy shots\first-run-win.mp4 2>$null; Remove-Item shots\first-run-win.mkv -ErrorAction SilentlyContinue
+          cmd /c "ffmpeg -y -loglevel error -i shots\first-run-win.mkv -c copy shots\first-run-win.mp4 2>nul"; Remove-Item shots\first-run-win.mkv -ErrorAction SilentlyContinue
           Get-ChildItem shots
       - name: Attach video and screenshots
         if: always()
