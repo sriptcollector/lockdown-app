@@ -33,7 +33,8 @@ export type Reliance =
   | "unsigned-scripts" // running scripts you downloaded or wrote
   | "git-history" // rewriting history would disrupt other clones
   | "build" // the project's build or tests
-  | "running-app"; // an app or service that is running now
+  | "running-app" // an app or service that is running now
+  | "startup-apps"; // programs the person set to start with the computer
 
 export interface BreakRisk {
   /** Plain words shown to the user: "this might break X". */

@@ -1,6 +1,6 @@
 [package]
 name = "lockdown"
-version = "0.2.10"
+version = "0.2.11"
 description = "Lockdown: find every way in, then fix it"
 authors = ["Westward"]
 edition = "2021"

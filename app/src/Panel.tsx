@@ -69,6 +69,7 @@ export function Panel(props: {
       s={s}
       demo={props.demo}
       paid={props.paid}
+      onScan={props.onScan}
       onFix={async () => {
         const q = await props.getQuestions().catch(() => []);
         if (q.length) setQuestions(q);
@@ -166,7 +167,7 @@ function Scanning({ s, onStop, demo }: { s: State; onStop: () => void; demo: boo
   );
 }
 
-function Found({ s, onFix, seeDetails, demo, paid }: { s: State; onFix: () => void; seeDetails: () => void; demo: boolean; paid: boolean }) {
+function Found({ s, onFix, onScan, seeDetails, demo, paid }: { s: State; onFix: () => void; onScan: () => void; seeDetails: () => void; demo: boolean; paid: boolean }) {
   const open = openFindings(s).filter((f) => f.severity !== "info");
   const autoFix = open.filter((f) => !isManual(f));
   const serious = open.filter((f) => f.severity === "critical" || f.severity === "high").length;
@@ -196,9 +197,14 @@ function Found({ s, onFix, seeDetails, demo, paid }: { s: State; onFix: () => vo
       </button>
       <p className="fine">{paid || demo ? "Takes about a minute. You can undo anything." : PRICE}</p>
       {s.summary?.partial && <p className="fine">You stopped the check early, so some things weren't checked.</p>}
-      <button className="textlink" onClick={seeDetails}>
-        See the list
-      </button>
+      <div className="row">
+        <button className="textlink" onClick={seeDetails}>
+          See the list
+        </button>
+        <button className="textlink" onClick={onScan}>
+          Check again
+        </button>
+      </div>
     </section>
   );
 }

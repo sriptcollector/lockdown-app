@@ -23,7 +23,10 @@ export async function detectRisks(f: Finding): Promise<BreakRisk[]> {
     }
     case "win.fw-block": {
       const what = p.proc === "java" ? "a Java server (often a Minecraft server)" : p.proc === "node" ? "a Node dev server" : p.proc ?? "this program";
-      add({ reliance: "lan-dev-servers", level: p.lanPeers > 0 ? "likely" : "possible", says: `This might break other devices on your network reaching ${what} on port ${p.port}. It keeps working on this PC.`, evidence: p.lanPeers > 0 ? `${p.lanPeers} device${p.lanPeers > 1 ? "s are" : " is"} connected to it now` : undefined });
+      // Dev tools and apps listening on high ports are usually the person's own work (a dev server, a game
+      // server, an app's helper). Blocking them by surprise breaks their setup, so those always ask first.
+      const own = /^(node|bun|deno|java|javaw|python\d*|pythonw|ruby|php|dotnet|go|cargo|electron|code|cursor|windsurf|idea64|pycharm64|webstorm64|rider64|studio64|docker.*|wsl.*|vmmem.*)$/i.test(String(p.proc ?? "").replace(/\.exe$/i, ""));
+      add({ reliance: "lan-dev-servers", level: p.lanPeers > 0 || own || Number(p.port) >= 10000 ? "likely" : "possible", says: `This might break other devices on your network reaching ${what} on port ${p.port}. It keeps working on this PC.`, evidence: p.lanPeers > 0 ? `${p.lanPeers} device${p.lanPeers > 1 ? "s are" : " is"} connected to it now` : undefined });
       break;
     }
     case "win.reg": {
@@ -42,7 +45,8 @@ export async function detectRisks(f: Finding): Promise<BreakRisk[]> {
       add({ reliance: "file-sharing", level: "possible", says: `This might break other computers that open "${p.name}" over the network.` });
       break;
     case "win.startup-disable":
-      add({ reliance: "running-app", level: "possible", says: `"${p.name}" won't start on its own anymore. You can still open it yourself.` });
+      // Only the person knows whether an unsigned startup program is theirs: always ask.
+      add({ reliance: "startup-apps", level: "likely", says: `"${p.name}" won't start on its own anymore. You can still open it yourself.` });
       break;
     case "mac.admin":
       if (p.reliance) add({ reliance: p.reliance, level: "possible", says: p.reliance === "remote-access" ? "This might break connecting to this Mac from your other devices." : p.reliance === "file-sharing" ? "This might break other computers that open shared folders on this Mac." : "This might stop unsigned apps you rely on from opening." });
@@ -57,7 +61,8 @@ export async function detectRisks(f: Finding): Promise<BreakRisk[]> {
       if (p.pages) add({ reliance: "public-repos", level: "likely", says: "This will take down this repo's GitHub Pages site on a free plan.", evidence: "GitHub Pages is on" });
       if (p.stars > 0 || p.forks > 0) add({ reliance: "public-repos", level: "likely", says: `This will lock out ${p.stars} people who starred it; ${p.forks} fork${p.forks === 1 ? "" : "s"} stay public and get detached for good.` });
       if (p.homepage) add({ reliance: "public-repos", level: "possible", says: `Links to the code from ${p.homepage} will stop working.` });
-      if (!risks.length) add({ reliance: "public-repos", level: "possible", says: "If you meant to share this code, people with the link won't see it anymore." });
+      // Who can see someone's code is their call, never an automatic fix.
+      if (!risks.length) add({ reliance: "public-repos", level: "likely", says: "If you meant to share this code, people with the link won't see it anymore." });
       break;
     }
     case "gh.actions-perms": {

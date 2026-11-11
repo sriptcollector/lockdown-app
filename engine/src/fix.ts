@@ -170,6 +170,7 @@ const ASK: Record<string, { q: string; help: string; keep: string; fix: string }
   "public-repos": { q: "Should some of your code stay public?", help: "Like an open-source project other people download.", keep: "Yes, leave it public", fix: "No, make it private" },
   "build": { q: "Tighten how your code gets published?", help: "Only matters if your website or app is published from GitHub. It might need a small change after.", keep: "Not now", fix: "Yes, tighten it" },
   "running-app": { q: "Turn off old keys that could let someone in?", help: "A website or app that still uses one would stop until it gets a new one.", keep: "Not now", fix: "Yes, fix them" },
+  "startup-apps": { q: "Do you know these programs that start with Windows?", help: "They aren't signed by their maker, which is common for small apps and also for malware.", keep: "Yes, they're mine", fix: "No, stop them" },
   "unsigned-scripts": { q: "Do you run scripts you download from the internet?", help: "Most people don't.", keep: "Yes, keep that working", fix: "No, block them" },
   "git-history": { q: "Clean leaked keys out of your code history?", help: "Anyone else working on the code will need a fresh copy.", keep: "Not now", fix: "Yes, clean it" },
   "direct-push": { q: "Protect your main code branch?", help: "Scripts that push straight to it might need a change.", keep: "Not now", fix: "Yes, protect it" },
